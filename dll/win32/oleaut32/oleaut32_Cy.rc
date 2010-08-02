@@ -1,7 +1,8 @@
 /*
- *	version information for ole32.dll
+ * Cefnogaeth iaith Cymraeg
+ * Welsh language support
  *
- * Copyright (C) 2003 John K. Hohm
+ * Copyright 2010 Ken Sharp
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,7 +19,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define WINE_OLESELFREGISTER
-#define WINE_FILENAME_STR "ole32.dll"
+#include "resource.h"
 
-#include <wine/wine_common_ver.rc>
+LANGUAGE LANG_WELSH, SUBLANG_DEFAULT
+
+STRINGTABLE
+{
+  IDS_TRUE  "Gwir"
+  IDS_FALSE "Ffug"
+  IDS_YES   "Ydw"
+  IDS_NO    "Dim"
+  IDS_ON    "Ar"
+  IDS_OFF   "Off"
+}
