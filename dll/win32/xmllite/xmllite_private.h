@@ -1,5 +1,7 @@
 /*
- * Copyright 2001 Dmitry Timoshkov
+ *    XMLLite private things
+ *
+ * Copyright 2012 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,10 +18,23 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define WINE_OLESELFREGISTER
-#define WINE_FILEDESCRIPTION_STR "Wine OLE dll"
-#define WINE_FILENAME_STR "oleaut32.dll"
-#define WINE_FILEVERSION 6, 0, 6001, 18000 /* version from Vista SP1 */
-#define WINE_FILEVERSION_STR "6.0.6001.18000"
+#ifndef __XMLLITE_PRIVATE__
+#define __XMLLITE_PRIVATE__
 
-#include "wine/wine_common_ver.rc"
+/* memory allocation functions */
+static inline void *heap_alloc(size_t len)
+{
+    return HeapAlloc(GetProcessHeap(), 0, len);
+}
+
+static inline void *heap_realloc(void *mem, size_t len)
+{
+    return HeapReAlloc(GetProcessHeap(), 0, mem, len);
+}
+
+static inline BOOL heap_free(void *mem)
+{
+    return HeapFree(GetProcessHeap(), 0, mem);
+}
+
+#endif /* __XMLLITE_PRIVATE__ */
