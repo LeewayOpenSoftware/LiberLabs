@@ -3,12 +3,12 @@
  * PROJECT:         ReactOS Console Server DLL
  * FILE:            win32ss/user/consrv/consolecpl.h
  * PURPOSE:         GUI front-end settings management - Header for console.dll
- * PROGRAMMERS:     Hermes Belusca - Maito
+ * PROGRAMMERS:     Hermes Belusca-Maito (hermes.belusca@sfr.fr)
  */
 
 #pragma once
 
-#include "settings.h"
+#include "include/settings.h"
 #include "guisettings.h"
 
 /* EOF */
