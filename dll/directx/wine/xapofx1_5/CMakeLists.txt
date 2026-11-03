@@ -10,7 +10,7 @@ include_directories(
 
 spec2def(xapofx1_5.dll xapofx1_5.spec)
 
-add_idl_headers(xapofx1_5_idlheader ${XA}/xaudio_classes.idl)
+add_idl_headers(xapofx1_5_idlheader ../xaudio2_9/xaudio_classes.idl)
 
 add_library(xapofx1_5 MODULE
     ${XA}/xapo.c

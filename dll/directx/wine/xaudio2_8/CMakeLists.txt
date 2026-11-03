@@ -10,7 +10,7 @@ include_directories(
 
 spec2def(xaudio2_8.dll xaudio2_8.spec)
 
-add_idl_headers(xaudio2_8_idlheader ${XA}/xaudio_classes.idl)
+add_idl_headers(xaudio2_8_idlheader ../xaudio2_9/xaudio_classes.idl)
 
 add_library(xaudio2_8 MODULE
     ${XA}/x3daudio.c
