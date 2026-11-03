@@ -57,7 +57,7 @@ jobs:
       run: |
         mkdir -p dx-dlls
         find output-Clang-amd64-debug/dll -name '*.dll' -exec cp {} dx-dlls/ \;
-        find output-Clang-amd64-debug/tests -name 'liberx_contracts.exe' -exec cp {} dx-dlls/ ;
+        find output-Clang-amd64-debug/tests -name 'liberx_contracts.exe' -exec cp {} dx-dlls/ \;
         ls -l dx-dlls
 
     - name: Upload the DLLs
