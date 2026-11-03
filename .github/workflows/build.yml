@@ -1,0 +1,67 @@
+name: Build DX
+on: [push, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  build-dx-amd64:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/lib/jvm
+        sudo docker system prune --all --force
+        df -h /
+
+    - name: Source checkout
+      uses: actions/checkout@v6
+
+    - name: Install host build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build flex bison ccache wget xz-utils tar python3-mako python3-yaml python3-packaging glslang-tools msitools
+
+    - name: Compute RosBE bootstrap SHA
+      id: rosbe_spec
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/LiberNT/libernt-build-toolchain/main/rosbe-unix-bootstrap.sh -o /tmp/rosbe-bootstrap.sh
+        echo "sha=$(sha1sum /tmp/rosbe-bootstrap.sh | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+    - name: Cache RosBE
+      id: cache_rosbe
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/opt/rosbe
+        key: rosbe-${{runner.os}}-${{steps.rosbe_spec.outputs.sha}}
+
+    - name: Install RosBE
+      if: ${{ steps.cache_rosbe.outputs.cache-hit != 'true' }}
+      run: sh /tmp/rosbe-bootstrap.sh
+
+    - name: Configure
+      run: |
+        . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+        ./configure.sh --clang -a amd64 \
+          -DREACTOS_TARGET_NT=0xA00 \
+          -DDIAGDATA_CHANNEL= \
+          -DENABLE_WOW64=OFF -DENABLE_ROSTESTS=OFF -DENABLE_ROSAPPS=OFF
+
+    - name: Build the DirectX modules
+      run: |
+        . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+        ninja -C output-Clang-amd64-debug -k 0 d3d12 d3d11 dxgi d3d9 d3d8 ddraw dsound dinput dinput8 dwrite d2d1 xinput1_4 d3d10 d3d10core d3d10_1 d3dcompiler_47 dcomp dxdiagn dxcore vkd3d
+
+    - name: Collect the DLLs
+      if: ${{ always() }}
+      run: |
+        mkdir -p dx-dlls
+        find output-Clang-amd64-debug/dll -name '*.dll' -exec cp {} dx-dlls/ \;
+        ls -l dx-dlls
+
+    - name: Upload the DLLs
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: dx-dlls-clang-amd64-${{ github.sha }}
+        path: dx-dlls
