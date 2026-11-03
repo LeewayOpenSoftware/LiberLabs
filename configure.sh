@@ -667,7 +667,7 @@ fi
 echo
 
 install_host_packages
-sync_glmark2_submodule
+# DX-PRUNED sync_glmark2_submodule
 sync_feeds
 verify_kdb_sources
 verify_arm64_sources

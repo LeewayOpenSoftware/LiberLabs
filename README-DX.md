@@ -27,7 +27,7 @@ Verified on 2026-11-03 (local, Windows host, RosBE LLVM, `ninja -j1`): configure
 - Run-time behaviour on a LiberNT image: see the device-creation diagnostic in the hive (`directx-research/device-test`), not in this repo.
 
 ## Changes against LiberNT-LDW (the only edits; marked `DX-PRUNED` in CMake)
-Top-level `CMakeLists.txt`: `boot`, `bootloader`, `base`, `submodules`, `drivers`, `hal`, `media`, `modules`, `ntoskrnl`, `subsystems` are not added; four stub custom targets (`bootcd`, `livecd_files`, `preinstall_partition`, `registry_inf`) stand in for targets those directories define; `create_registry_hives()` and `create_iso_lists()` are off. `dll/CMakeLists.txt` and `dll/win32/CMakeLists.txt` add only the kept directories (the original `dll/win32/CMakeLists.txt` is kept as `CMakeLists.txt.orig`). `sdk/lib/CMakeLists.txt`: `fslib` off.
+Top-level `CMakeLists.txt`: `boot`, `bootloader`, `base`, `submodules`, `drivers`, `hal`, `media`, `modules`, `ntoskrnl`, `subsystems` are not added; four stub custom targets (`bootcd`, `livecd_files`, `preinstall_partition`, `registry_inf`) stand in for targets those directories define; `create_registry_hives()` and `create_iso_lists()` are off. `dll/CMakeLists.txt` and `dll/win32/CMakeLists.txt` add only the kept directories (the original `dll/win32/CMakeLists.txt` is kept as `CMakeLists.txt.orig`). `sdk/lib/CMakeLists.txt`: `fslib` off. `configure.sh`: the glmark2 submodule sync is skipped (not part of DirectX).
 
 ## License
 See `COPYING*`, `CREDITS.md` and the per-file headers: GPL-2.0-or-later (ReactOS) with LGPL-2.1+ Wine- and vkd3d-derived code. All notices are kept unchanged.
