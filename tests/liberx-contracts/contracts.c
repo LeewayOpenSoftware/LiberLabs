@@ -11,6 +11,7 @@
 #include <dwrite.h>
 
 #define CONTRACT_VERSION 1
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 DEFINE_GUID(iid_dxgi_factory1, 0x770aae78, 0xf26f, 0x4dba, 0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87);
 DEFINE_GUID(iid_dwrite_factory, 0xb859ee5a, 0xd838, 0x4b5b, 0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48);
@@ -26,8 +27,8 @@ ASSERT_SLOT(dxgi_factory_enum_adapters, IDXGIFactoryVtbl, EnumAdapters, 7);
 ASSERT_SLOT(dxgi_factory_create_swap_chain, IDXGIFactoryVtbl, CreateSwapChain, 10);
 ASSERT_SLOT(dxgi_factory1_enum_adapters1, IDXGIFactory1Vtbl, EnumAdapters1, 12);
 ASSERT_SLOT(d3d12_object_set_name, ID3D12ObjectVtbl, SetName, 6);
-ASSERT_SLOT(d3d12_device_get_node_count, ID3D12DeviceVtbl, GetNodeCount, 8);
-ASSERT_SLOT(d3d12_device_create_command_queue, ID3D12DeviceVtbl, CreateCommandQueue, 9);
+ASSERT_SLOT(d3d12_device_get_node_count, ID3D12DeviceVtbl, GetNodeCount, 7);
+ASSERT_SLOT(d3d12_device_create_command_queue, ID3D12DeviceVtbl, CreateCommandQueue, 8);
 ASSERT_SLOT(dwrite_factory_get_system_font_collection, IDWriteFactoryVtbl, GetSystemFontCollection, 3);
 
 static int fail_count, skip_count, pass_count;
