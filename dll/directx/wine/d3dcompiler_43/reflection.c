@@ -127,7 +127,10 @@ struct d3dcompiler_shader_reflection
     uint32_t target;
 
     UINT mov_instruction_count;
+    UINT movc_instruction_count;
     UINT conversion_instruction_count;
+    UINT bitwise_instruction_count;
+    BOOL sample_frequency;
 
     char *resource_string;
     D3D12_SHADER_INPUT_BIND_DESC *bound_resources;
@@ -608,9 +611,11 @@ static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetMovInstructionCou
 static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetMovcInstructionCount(
         ID3D11ShaderReflection *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3dcompiler_shader_reflection *This = impl_from_ID3D11ShaderReflection(iface);
 
-    return 0;
+    TRACE("iface %p\n", iface);
+
+    return This->movc_instruction_count;
 }
 
 static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetConversionInstructionCount(
@@ -626,25 +631,31 @@ static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetConversionInstruc
 static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetBitwiseInstructionCount(
         ID3D11ShaderReflection *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3dcompiler_shader_reflection *This = impl_from_ID3D11ShaderReflection(iface);
 
-    return 0;
+    TRACE("iface %p\n", iface);
+
+    return This->bitwise_instruction_count;
 }
 
 static D3D_PRIMITIVE STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetGSInputPrimitive(
         ID3D11ShaderReflection *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3dcompiler_shader_reflection *This = impl_from_ID3D11ShaderReflection(iface);
 
-    return 0;
+    TRACE("iface %p\n", iface);
+
+    return This->desc.InputPrimitive;
 }
 
 static BOOL STDMETHODCALLTYPE d3dcompiler_shader_reflection_IsSampleFrequencyShader(
         ID3D11ShaderReflection *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3dcompiler_shader_reflection *This = impl_from_ID3D11ShaderReflection(iface);
 
-    return FALSE;
+    TRACE("iface %p\n", iface);
+
+    return This->sample_frequency;
 }
 
 static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetNumInterfaceSlots(
@@ -673,7 +684,7 @@ static UINT STDMETHODCALLTYPE d3dcompiler_shader_reflection_GetThreadGroupSize(
     if (!sizex || !sizey || !sizez)
     {
         WARN("Invalid argument specified.\n");
-        return E_INVALIDARG;
+        return 0;
     }
 
     *sizex = reflection->thread_group_size_info.x;
@@ -1119,7 +1130,10 @@ static HRESULT parse_stat(struct d3dcompiler_shader_reflection *r, const struct 
     r->desc.TextureBiasInstructions = normalised_stat.sample_bias_count;
     r->desc.TextureGradientInstructions = normalised_stat.sample_grad_count;
     r->mov_instruction_count = normalised_stat.mov_count;
+    r->movc_instruction_count = normalised_stat.movc_count;
     r->conversion_instruction_count = normalised_stat.type_conversion_count;
+    r->bitwise_instruction_count = normalised_stat.bitwise_count;
+    r->sample_frequency = !!normalised_stat.sample_frequency;
 #if D3D_COMPILER_VERSION
     r->desc.InputPrimitive = normalised_stat.input_primitive;
     r->desc.GSOutputTopology = normalised_stat.gs_output_topology;
