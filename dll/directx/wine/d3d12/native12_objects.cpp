@@ -199,7 +199,7 @@ D3D12_COMMAND_LIST_TYPE STDMETHODCALLTYPE Native12CommandList::GetType() { retur
 HRESULT STDMETHODCALLTYPE Native12CommandList::Close()
 {
     if (!recording) return E_FAIL;
-    table->pfnCloseCommandList(driver);
+    if (SUCCEEDED(error)) table->pfnCloseCommandList(driver);
     recording = false;
     if (allocator) InterlockedCompareExchangePointer(reinterpret_cast<void *volatile *>(&allocator->recording_list),
             NULL, this);

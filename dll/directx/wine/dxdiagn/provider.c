@@ -604,6 +604,92 @@ static HRESULT fill_processor_information(IDxDiagContainerImpl_Container *node)
     return add_bstr_property(node, L"szProcessorEnglish", print_buf);
 }
 
+typedef HRESULT (WINAPI *d3d11_create_device_func)(void *adapter, UINT driver_type, HMODULE software, UINT flags,
+        const UINT *levels, UINT level_count, UINT sdk_version, void **device, UINT *level, void **context);
+typedef HRESULT (WINAPI *d3d12_create_device_func)(IUnknown *adapter, UINT level, REFIID iid, void **device);
+
+static const UINT probe_levels[] = {0xc200, 0xc100, 0xc000, 0xb100, 0xb000, 0xa100, 0xa000, 0x9300, 0x9200, 0x9100};
+
+static void probe_d3d11(WCHAR *buffer, size_t size)
+{
+    static const struct { UINT type; const WCHAR *name; } types[] = {{1, L"HARDWARE"}, {5, L"WARP"}, {2, L"REFERENCE"}};
+    d3d11_create_device_func create;
+    HMODULE module;
+    WCHAR *out = buffer;
+    unsigned int i;
+
+    if (!(module = LoadLibraryW(L"d3d11.dll")) || !(create = (void *)GetProcAddress(module, "D3D11CreateDevice")))
+    {
+        swprintf(buffer, size, L"unavailable: d3d11.dll or D3D11CreateDevice not found");
+        if (module) FreeLibrary(module);
+        return;
+    }
+
+    buffer[0] = 0;
+    for (i = 0; i < ARRAY_SIZE(types); ++i)
+    {
+        void *device = NULL;
+        UINT level = 0;
+        HRESULT hr;
+
+        hr = create(NULL, types[i].type, NULL, 0, probe_levels, ARRAY_SIZE(probe_levels), 7, &device, &level, NULL);
+        out += swprintf(out, size - (out - buffer), L"%s%s: hr=%#lx level=%#x", i ? L"; " : L"", types[i].name,
+                hr, SUCCEEDED(hr) ? level : 0);
+        if (device) IUnknown_Release((IUnknown *)device);
+    }
+    FreeLibrary(module);
+}
+
+static void probe_d3d12(WCHAR *buffer, size_t size)
+{
+    static const GUID iid_device = {0x189819f1, 0x1db6, 0x4b57, {0xbe, 0x54, 0x18, 0x21, 0x33, 0x9b, 0x85, 0xf7}};
+    d3d12_create_device_func create;
+    HMODULE module;
+    HRESULT hr = E_FAIL;
+    unsigned int i;
+
+    if (!(module = LoadLibraryW(L"d3d12.dll")) || !(create = (void *)GetProcAddress(module, "D3D12CreateDevice")))
+    {
+        swprintf(buffer, size, L"unavailable: d3d12.dll or D3D12CreateDevice not found");
+        if (module) FreeLibrary(module);
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(probe_levels) && probe_levels[i] >= 0xb000; ++i)
+    {
+        void *device = NULL;
+
+        if (SUCCEEDED(hr = create(NULL, probe_levels[i], &iid_device, &device)))
+        {
+            swprintf(buffer, size, L"highest created level=%#x hr=%#lx", probe_levels[i], hr);
+            IUnknown_Release((IUnknown *)device);
+            FreeLibrary(module);
+            return;
+        }
+    }
+    swprintf(buffer, size, L"no device created, last hr=%#lx", hr);
+    FreeLibrary(module);
+}
+
+static HRESULT add_measured_runtime_properties(IDxDiagContainerImpl_Container *node)
+{
+    WCHAR text[300];
+    HRESULT hr;
+
+    hr = add_bstr_property(node, L"szDirectXVersionNote",
+            L"legacy compatibility value only; the measured Direct3D 11 and 12 results are in szLiberXD3D11Probe and szLiberXD3D12Probe");
+    if (FAILED(hr))
+        return hr;
+
+    probe_d3d11(text, ARRAY_SIZE(text));
+    hr = add_bstr_property(node, L"szLiberXD3D11Probe", text);
+    if (FAILED(hr))
+        return hr;
+
+    probe_d3d12(text, ARRAY_SIZE(text));
+    return add_bstr_property(node, L"szLiberXD3D12Probe", text);
+}
+
 static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
 {
     HRESULT hr;
@@ -630,6 +716,10 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
         return hr;
 
     hr = add_bstr_property(node, L"szDirectXVersionLongEnglish", L"= \"DirectX 9.0c (4.09.0000.0904)");
+    if (FAILED(hr))
+        return hr;
+
+    hr = add_measured_runtime_properties(node);
     if (FAILED(hr))
         return hr;
 
