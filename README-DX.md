@@ -1,6 +1,6 @@
-# LiberNT-DirectX (private, provisional name)
+# LiberX (provisional name)
 
-Private research repository for the DirectX user-mode components of LiberNT: research, completion and parity work, to be synced back into LiberNT-LDW once it roughly works. Owner: Leeway Open Software. Not for redistribution.
+LiberX is a private research repository (https://github.com/LeewayOpenSoftware/LiberX) for the DirectX user-mode components of LiberNT: research, completion and parity work, to be synced back into LiberNT-LDW once it roughly works. Owner: Leeway Open Software. Not for redistribution.
 
 ## What this is
 A **flat snapshot** of the DirectX-relevant part of LiberNT-LDW `leeway/main` at `2eef070f5d` (the post-upstream-sync tip was not available yet), stripped to DirectX plus the minimum needed to build it. History is **not** included yet: it will be imported with `git filter-repo` on the same path list (`DX-PATHS.txt`) when disk space allows. See `PROVENANCE.md`.

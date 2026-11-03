@@ -1,4 +1,4 @@
-# PROVENANCE
+# PROVENANCE (project LiberX, provisional name; repository https://github.com/LeewayOpenSoftware/LiberX)
 
 ## Source
 - Repository: `LeewayOpenSoftware/LiberNT-LDW`, branch `leeway/main`, commit `2eef070f5ded71e0d5364741e21b6a32566012d2` (2026-11-02; the tip right after the 184-commit upstream sync was not available when this snapshot was made).
