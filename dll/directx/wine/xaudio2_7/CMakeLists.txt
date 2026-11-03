@@ -1,5 +1,5 @@
 
-add_definitions(-DXAUDIO2_VER=7)
+add_definitions(-DXAUDIO2_VER=7 -DWINE_REGISTER_DLL)
 
 set(XA ${CMAKE_CURRENT_SOURCE_DIR}/../xaudio2_9)
 
@@ -25,7 +25,7 @@ add_library(xaudio2_7 MODULE
 add_idl_reg_scripts(xaudio2_7 registry xaudio_register.idl)
 set_module_type(xaudio2_7 win32dll)
 target_compile_definitions(xaudio2_7 PRIVATE __WINESRC__)
-target_link_libraries(xaudio2_7 faudio mfuuid uuid wine)
+target_link_libraries(xaudio2_7 faudio mfuuid uuid wine wine_dll_register wine_dll_canunload)
 add_importlibs(xaudio2_7 mfplat mfreadwrite propsys advapi32 ole32 user32 msvcrt kernel32 ntdll)
 add_dependencies(xaudio2_7 xaudio2_7_idlheader)
 add_cd_file(TARGET xaudio2_7 DESTINATION reactos/system32 FOR all)
