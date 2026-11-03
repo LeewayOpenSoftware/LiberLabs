@@ -3,7 +3,7 @@
 LiberX is a private research repository (https://github.com/LeewayOpenSoftware/LiberX) for the DirectX user-mode components of LiberNT: research, completion and parity work, to be synced back into LiberNT-LDW once it roughly works. Owner: Leeway Open Software. Not for redistribution.
 
 ## What this is
-A **flat snapshot** of the DirectX-relevant part of LiberNT-LDW `leeway/main` at `2eef070f5d` (the post-upstream-sync tip was not available yet), stripped to DirectX plus the minimum needed to build it. History is **not** included yet: it will be imported with `git filter-repo` on the same path list (`DX-PATHS.txt`) when disk space allows. See `PROVENANCE.md`.
+A **flat snapshot** of the DirectX-relevant part of LiberNT-LDW `leeway/main` at `65bfb3bdba` (the tip after the 184-commit upstream sync; refreshed from `2eef070f5d` in one commit, glue files untouched), stripped to DirectX plus the minimum needed to build it. History is **not** included yet: it will be imported with `git filter-repo` on the same path list (`DX-PATHS.txt`) when disk space allows. See `PROVENANCE.md`.
 
 ## Layout
 - `dll/directx/**`: Wine-derived Direct3D 8/9/10/11/12, DXGI, Direct2D, DirectDraw, DirectSound, DirectInput, DirectMusic, wined3d, vkd3d-based D3D12, dxdiagn and the ReactOS-native (disabled) modules.
@@ -23,7 +23,7 @@ Verified on 2026-11-03 (local, Windows host, RosBE LLVM, `ninja -j1`): configure
 - `vulkan-1` needs the mesa feed (`submodules/mesa`, not checked out), so the Vulkan loader and lavapipe are not part of this build.
 - The DX tests (apitests, winetests) are not in the snapshot.
 - Import libraries come from the full system DLL directories listed in `dll/win32/CMakeLists.txt`; whether fewer are enough has not been minimized.
-- The CI workflow has not run yet when this file is written; see the Actions tab for the result.
+- CI (Actions tab) built the 20 targets green on the previous source commit; the refresh commit has its own run.
 - Run-time behaviour on a LiberNT image: see the device-creation diagnostic in the hive (`directx-research/device-test`), not in this repo.
 
 ## Changes against LiberNT-LDW (the only edits; marked `DX-PRUNED` in CMake)

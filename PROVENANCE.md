@@ -1,7 +1,7 @@
 # PROVENANCE (project LiberX, provisional name; repository https://github.com/LeewayOpenSoftware/LiberX)
 
 ## Source
-- Repository: `LeewayOpenSoftware/LiberNT-LDW`, branch `leeway/main`, commit `2eef070f5ded71e0d5364741e21b6a32566012d2` (2026-11-02; the tip right after the 184-commit upstream sync was not available when this snapshot was made).
+- Repository: `LeewayOpenSoftware/LiberNT-LDW`, branch `leeway/main`, commit `65bfb3bdbab44ec74deca826e18ba82dc6175db4` (the tip after the 184-commit upstream sync). The snapshot was first built on `2eef070f5ded71e0d5364741e21b6a32566012d2` and refreshed to this commit in one change (80 changed and 1 new file under the kept paths; the CMake glue files were kept).
 - Method: `git archive` of the paths in `DX-PATHS.txt`, then the CMake glue edits listed in `README-DX.md`. No file content was otherwise modified.
 - History: not included in this snapshot. It will be imported later with `git filter-repo` using `DX-PATHS.txt`, which keeps the authorship and dates of every commit touching these paths.
 
