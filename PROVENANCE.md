@@ -1,9 +1,9 @@
 # PROVENANCE (project LiberX, provisional name; repository https://github.com/LeewayOpenSoftware/LiberX)
 
 ## Source
-- Repository: `LeewayOpenSoftware/LiberNT-LDW`, branch `leeway/main`, commit `65bfb3bdbab44ec74deca826e18ba82dc6175db4` (the tip after the 184-commit upstream sync). The snapshot was first built on `2eef070f5ded71e0d5364741e21b6a32566012d2` and refreshed to this commit in one change (80 changed and 1 new file under the kept paths; the CMake glue files were kept).
+- Repository: `LeewayOpenSoftware/LiberNT-LDW`, branch `leeway/main`, commit `65bfb3bdbab44ec74deca826e18ba82dc6175db4` (the tip after the 184-commit upstream sync). The snapshot was first built on `2eef070f5ded71e0d5364741e21b6a32566012d2` and refreshed to this commit in one change (77 changed and 4 new files under the kept paths; the CMake glue files were kept).
 - Method: `git archive` of the paths in `DX-PATHS.txt`, then the CMake glue edits listed in `README-DX.md`. No file content was otherwise modified.
-- History: not included in this snapshot. It will be imported later with `git filter-repo` using `DX-PATHS.txt`, which keeps the authorship and dates of every commit touching these paths.
+- History: imported with `git filter-repo` from a full clone of `leeway/main` at 65bfb3bdba (12387 commits, original authors and dates), using `DX-PATHS.txt` plus `scripts`, `dll/3rdparty/mbedtls`, `dll/win32/dbghelp` and `dll/appcompat/apphelp`. The vendored `submodules/mesa` and `submodules/fex-arm64ec` trees of older commits were dropped. It is attached by a merge that keeps the snapshot tree.
 
 ## Origins and licenses (unchanged from LiberNT-LDW)
 | Part | Origin | License (as stated in the files) |

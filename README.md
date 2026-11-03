@@ -2,7 +2,7 @@
 
 LiberX is a private Leeway Open Software research repository for the DirectX user-mode components of LiberNT: research, completion and parity work. Finished work is meant to be brought back into LiberNT once it roughly works.
 
-Origin: derived from LiberNT-LDW `leeway/main` at `65bfb3bdbab44ec74deca826e18ba82dc6175db4` (the tip after the 184-commit upstream sync; stripped to DirectX plus what builds it; history not imported yet; first CI build was green at the previous source commit 2eef070f5d).
+Origin: derived from LiberNT-LDW `leeway/main` at `65bfb3bdbab44ec74deca826e18ba82dc6175db4` (the tip after the 184-commit upstream sync; stripped to DirectX plus what builds it; history of the kept paths attached; first CI build was green at the previous source commit 2eef070f5d).
 
 ## What builds
 The Wine-derived Direct3D 8/9/10/11/12, DXGI, Direct2D, DirectDraw, DirectSound, DirectInput, DirectWrite and dxdiagn modules, `xinput1_4`, and the vkd3d library: 19 DLLs link on clang amd64 (verified locally on 2026-11-03). Not built: `vulkan-1` (needs the mesa feed), the DirectX test suites (not in the snapshot).

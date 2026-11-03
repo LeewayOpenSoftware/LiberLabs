@@ -3,7 +3,7 @@
 LiberX is a private research repository (https://github.com/LeewayOpenSoftware/LiberX) for the DirectX user-mode components of LiberNT: research, completion and parity work, to be synced back into LiberNT-LDW once it roughly works. Owner: Leeway Open Software. Not for redistribution.
 
 ## What this is
-A **flat snapshot** of the DirectX-relevant part of LiberNT-LDW `leeway/main` at `65bfb3bdba` (the tip after the 184-commit upstream sync; refreshed from `2eef070f5d` in one commit, glue files untouched), stripped to DirectX plus the minimum needed to build it. History is **not** included yet: it will be imported with `git filter-repo` on the same path list (`DX-PATHS.txt`) when disk space allows. See `PROVENANCE.md`.
+A **flat snapshot** of the DirectX-relevant part of LiberNT-LDW `leeway/main` at `65bfb3bdba` (the tip after the 184-commit upstream sync; refreshed from `2eef070f5d` in one commit, glue files untouched), stripped to DirectX plus the minimum needed to build it. The history of the kept paths is attached (12387 commits via `git filter-repo`; see `PROVENANCE.md`). See `PROVENANCE.md`.
 
 ## Layout
 - `dll/directx/**`: Wine-derived Direct3D 8/9/10/11/12, DXGI, Direct2D, DirectDraw, DirectSound, DirectInput, DirectMusic, wined3d, vkd3d-based D3D12, dxdiagn and the ReactOS-native (disabled) modules.
