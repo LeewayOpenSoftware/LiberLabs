@@ -121,3 +121,4 @@ modules/rostests/winetests/qcap
 modules/rostests/winetests/quartz
 modules/rostests/winetests/xinput1_3
 modules/rostests/dxtest
+dll/win32/dbghelp
