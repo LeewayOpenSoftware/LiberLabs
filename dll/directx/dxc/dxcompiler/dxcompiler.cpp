@@ -68,7 +68,7 @@ static inline bool IidEq(REFIID a, REFIID b) { return IsEqualIID(a, b) != FALSE;
  * IDxcBlobEncoding by inheritance). Holds either binary bytes or a    *
  * NUL-terminated UTF-8 string.                                        *
  * ------------------------------------------------------------------ */
-class DxcBlobImpl : public IDxcBlobUtf8
+class DxcBlobImpl final : public IDxcBlobUtf8
 {
     LONG   m_ref;
     void  *m_buf;        /* CoTaskMemAlloc'd */
@@ -153,7 +153,7 @@ static DxcBlobImpl *NewTextBlob(const char *utf8)
 /* ------------------------------------------------------------------ *
  * Result object - implements IDxcResult (covers IDxcOperationResult). *
  * ------------------------------------------------------------------ */
-class DxcResultImpl : public IDxcResult
+class DxcResultImpl final : public IDxcResult
 {
     LONG         m_ref;
     HRESULT      m_status;
@@ -345,7 +345,7 @@ static char *SourceToUtf8(const DxcBuffer *b, size_t *outLen)
 /* ------------------------------------------------------------------ *
  * IDxcCompiler3                                                        *
  * ------------------------------------------------------------------ */
-class DxcCompilerImpl : public IDxcCompiler3
+class DxcCompilerImpl final : public IDxcCompiler3
 {
     LONG m_ref;
 public:
@@ -528,7 +528,7 @@ public:
 /* ------------------------------------------------------------------ *
  * IDxcUtils                                                            *
  * ------------------------------------------------------------------ */
-class DxcUtilsImpl : public IDxcUtils
+class DxcUtilsImpl final : public IDxcUtils
 {
     LONG m_ref;
 public:
@@ -622,7 +622,7 @@ public:
  * IDxcValidator - structural, UNSIGNED DXIL validation via vkd3d.      *
  * No Microsoft dxil.dll signing/hash is performed.                    *
  * ------------------------------------------------------------------ */
-class DxcValidatorImpl : public IDxcValidator
+class DxcValidatorImpl final : public IDxcValidator
 {
     LONG m_ref;
 public:
