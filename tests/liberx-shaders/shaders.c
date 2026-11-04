@@ -236,7 +236,7 @@ static void test_pixel_shader(void)
 
 static void test_compute_shader(void)
 {
-    UINT x = 0, y = 0, z = 0, total, sx, sy, sz;
+    UINT x = 0, y = 0, z = 0, total, sy = 0, sz = 0;
     ID3D11ShaderReflection *r;
     ID3DBlob *code;
 
@@ -246,7 +246,6 @@ static void test_compute_shader(void)
 
     total = r->lpVtbl->GetThreadGroupSize(r, &x, &y, &z);
     check("cs_5_0", "thread-group", x == 8 && y == 4 && z == 2 && total == 64, "%ux%ux%u total %u", x, y, z, total);
-    sx = sy = sz = 0;
     total = r->lpVtbl->GetThreadGroupSize(r, NULL, &sy, &sz);
     check("cs_5_0", "thread-group-null-arg", total == 0, "total %#x for a NULL argument", total);
     r->lpVtbl->Release(r);
