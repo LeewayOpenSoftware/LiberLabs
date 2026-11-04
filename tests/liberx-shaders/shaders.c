@@ -7,6 +7,8 @@
 #include <d3d11shader.h>
 
 #define SHADER_SUITE_VERSION 1
+#define LIBERX_SHVER_PIXEL 0
+#define LIBERX_SHVER_VERTEX 1
 #define COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
 static const GUID iid_reflection47 = {0x8d536ca1, 0x0cca, 0x4956, {0xa8, 0x37, 0x78, 0x69, 0x63, 0x75, 0x55, 0x84}};
@@ -161,19 +163,19 @@ static void test_vertex_shader(void)
     if (!(r = reflect("vs_5_0", "reflect", code))) { ID3D10Blob_Release(code); return; }
 
     memset(&desc, 0, sizeof(desc));
-    hr = ID3D11ShaderReflection_GetDesc(r, &desc);
+    hr = r->lpVtbl->GetDesc(r, &desc);
     check("vs_5_0", "desc", hr == S_OK && desc.InstructionCount > 0, "hr=%#lx instructions=%u", hr,
             desc.InstructionCount);
-    check("vs_5_0", "desc-version", ((desc.Version >> 16) & 0xffff) == D3D11_SHVER_VERTEX_SHADER,
+    check("vs_5_0", "desc-version", ((desc.Version >> 16) & 0xffff) == LIBERX_SHVER_VERTEX,
             "version %#x", desc.Version);
     check("vs_5_0", "input-count", desc.InputParameters == 2, "%u", desc.InputParameters);
     check("vs_5_0", "output-count", desc.OutputParameters == 3, "%u", desc.OutputParameters);
     check("vs_5_0", "cbuffer-count", desc.ConstantBuffers == 1, "%u", desc.ConstantBuffers);
     check("vs_5_0", "bound-count", desc.BoundResources == 1, "%u", desc.BoundResources);
 
-    cb = ID3D11ShaderReflection_GetConstantBufferByIndex(r, 0);
+    cb = r->lpVtbl->GetConstantBufferByIndex(r, 0);
     memset(&cb_desc, 0, sizeof(cb_desc));
-    hr = ID3D11ShaderReflectionConstantBuffer_GetDesc(cb, &cb_desc);
+    hr = cb->lpVtbl->GetDesc(cb, &cb_desc);
     check("vs_5_0", "cbuffer-desc", hr == S_OK && cb_desc.Name && !strcmp(cb_desc.Name, "Params")
             && cb_desc.Variables == 3, "hr=%#lx name=%s variables=%u", hr, cb_desc.Name ? cb_desc.Name : "(null)",
             cb_desc.Variables);
@@ -189,18 +191,18 @@ static void test_vertex_shader(void)
 
         for (i = 0; i < COUNT_OF(expected); ++i)
         {
-            ID3D11ShaderReflectionVariable *v = ID3D11ShaderReflectionConstantBuffer_GetVariableByIndex(cb, i);
+            ID3D11ShaderReflectionVariable *v = cb->lpVtbl->GetVariableByIndex(cb, i);
             D3D11_SHADER_VARIABLE_DESC vd;
 
             memset(&vd, 0, sizeof(vd));
-            hr = ID3D11ShaderReflectionVariable_GetDesc(v, &vd);
+            hr = v->lpVtbl->GetDesc(v, &vd);
             check("vs_5_0", expected[i].name, hr == S_OK && vd.Name && !strcmp(vd.Name, expected[i].name)
                     && vd.StartOffset == expected[i].offset && vd.Size == expected[i].size,
                     "hr=%#lx name=%s offset=%u size=%u", hr, vd.Name ? vd.Name : "(null)", vd.StartOffset, vd.Size);
         }
     }
 
-    ID3D11ShaderReflection_Release(r);
+    r->lpVtbl->Release(r);
     ID3D10Blob_Release(code);
 }
 
@@ -218,17 +220,17 @@ static void test_pixel_shader(void)
     if (!(r = reflect("ps_5_0", "reflect", code))) { ID3D10Blob_Release(code); return; }
 
     memset(&desc, 0, sizeof(desc));
-    hr = ID3D11ShaderReflection_GetDesc(r, &desc);
-    check("ps_5_0", "desc-version", hr == S_OK && ((desc.Version >> 16) & 0xffff) == D3D11_SHVER_PIXEL_SHADER,
+    hr = r->lpVtbl->GetDesc(r, &desc);
+    check("ps_5_0", "desc-version", hr == S_OK && ((desc.Version >> 16) & 0xffff) == LIBERX_SHVER_PIXEL,
             "hr=%#lx version %#x", hr, desc.Version);
     check("ps_5_0", "bound-count", desc.BoundResources == 2, "%u (texture and sampler)", desc.BoundResources);
     check("ps_5_0", "texture-sample", desc.TextureNormalInstructions == 1, "%u", desc.TextureNormalInstructions);
-    check("ps_5_0", "movc-count-consistent", ID3D11ShaderReflection_GetMovcInstructionCount(r) <= desc.InstructionCount,
-            "%u of %u", ID3D11ShaderReflection_GetMovcInstructionCount(r), desc.InstructionCount);
+    check("ps_5_0", "movc-count-consistent", r->lpVtbl->GetMovcInstructionCount(r) <= desc.InstructionCount,
+            "%u of %u", r->lpVtbl->GetMovcInstructionCount(r), desc.InstructionCount);
     check("ps_5_0", "bitwise-count-consistent",
-            ID3D11ShaderReflection_GetBitwiseInstructionCount(r) <= desc.InstructionCount, "%u of %u",
-            ID3D11ShaderReflection_GetBitwiseInstructionCount(r), desc.InstructionCount);
-    ID3D11ShaderReflection_Release(r);
+            r->lpVtbl->GetBitwiseInstructionCount(r) <= desc.InstructionCount, "%u of %u",
+            r->lpVtbl->GetBitwiseInstructionCount(r), desc.InstructionCount);
+    r->lpVtbl->Release(r);
     ID3D10Blob_Release(code);
 }
 
@@ -242,12 +244,12 @@ static void test_compute_shader(void)
     if (!code) return;
     if (!(r = reflect("cs_5_0", "reflect", code))) { ID3D10Blob_Release(code); return; }
 
-    total = ID3D11ShaderReflection_GetThreadGroupSize(r, &x, &y, &z);
+    total = r->lpVtbl->GetThreadGroupSize(r, &x, &y, &z);
     check("cs_5_0", "thread-group", x == 8 && y == 4 && z == 2 && total == 64, "%ux%ux%u total %u", x, y, z, total);
     sx = sy = sz = 0;
-    total = ID3D11ShaderReflection_GetThreadGroupSize(r, NULL, &sy, &sz);
+    total = r->lpVtbl->GetThreadGroupSize(r, NULL, &sy, &sz);
     check("cs_5_0", "thread-group-null-arg", total == 0, "total %#x for a NULL argument", total);
-    ID3D11ShaderReflection_Release(r);
+    r->lpVtbl->Release(r);
     ID3D10Blob_Release(code);
 }
 
