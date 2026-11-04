@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 #include <initguid.h>
 #include <d3d9.h>
 #include <ddraw.h>
@@ -305,6 +306,48 @@ static void run_d3d9ex(HWND hwnd, HMODULE mod)
     /* device loss / recovery path. */
     hr = IDirect3DDevice9Ex_CheckDeviceState(dev, hwnd);
     check("d3d9ex", "CheckDeviceState", hr == D3D_OK || hr == S_PRESENT_OCCLUDED, "hr=0x%08lx", hr);
+
+    /* ComposeRects: copy an 8x8 block of a known colour from src to (4,4) in dst. */
+    {
+        IDirect3DSurface9 *csrc = NULL, *cdst = NULL;
+        IDirect3DVertexBuffer9 *sd = NULL, *dd = NULL;
+        D3DLOCKED_RECT lr;
+        void *p = NULL;
+        struct { unsigned short x, y, w, h; } srcd = {0, 0, 8, 8};
+        struct { unsigned short x, y; } dstd = {4, 4};
+        int ok = 1, y;
+
+        if (SUCCEEDED(IDirect3DDevice9Ex_CreateOffscreenPlainSurface(dev, 16, 16, D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &csrc, NULL))
+                && SUCCEEDED(IDirect3DDevice9Ex_CreateOffscreenPlainSurface(dev, 16, 16, D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &cdst, NULL))
+                && SUCCEEDED(IDirect3DDevice9Ex_CreateVertexBuffer(dev, sizeof(srcd), 0, 0, D3DPOOL_SYSTEMMEM, &sd, NULL))
+                && SUCCEEDED(IDirect3DDevice9Ex_CreateVertexBuffer(dev, sizeof(dstd), 0, 0, D3DPOOL_SYSTEMMEM, &dd, NULL)))
+        {
+            IDirect3DSurface9_LockRect(csrc, &lr, NULL, 0);
+            for (y = 0; y < 16; ++y) { int x; for (x = 0; x < 16; ++x) ((DWORD *)((BYTE *)lr.pBits + y * lr.Pitch))[x] = 0xaabbccddu; }
+            IDirect3DSurface9_UnlockRect(csrc);
+            IDirect3DSurface9_LockRect(cdst, &lr, NULL, 0);
+            for (y = 0; y < 16; ++y) { int x; for (x = 0; x < 16; ++x) ((DWORD *)((BYTE *)lr.pBits + y * lr.Pitch))[x] = 0; }
+            IDirect3DSurface9_UnlockRect(cdst);
+            if (SUCCEEDED(IDirect3DVertexBuffer9_Lock(sd, 0, 0, &p, 0))) { memcpy(p, &srcd, sizeof(srcd)); IDirect3DVertexBuffer9_Unlock(sd); }
+            if (SUCCEEDED(IDirect3DVertexBuffer9_Lock(dd, 0, 0, &p, 0))) { memcpy(p, &dstd, sizeof(dstd)); IDirect3DVertexBuffer9_Unlock(dd); }
+
+            hr = IDirect3DDevice9Ex_ComposeRects(dev, csrc, cdst, sd, 1, dd, D3DCOMPOSERECTS_COPY, 0, 0);
+            if (SUCCEEDED(hr))
+            {
+                IDirect3DSurface9_LockRect(cdst, &lr, NULL, D3DLOCK_READONLY);
+                if ((((DWORD *)((BYTE *)lr.pBits + 4 * lr.Pitch))[4]) != 0xaabbccddu) ok = 0; /* copied */
+                if ((((DWORD *)((BYTE *)lr.pBits + 0 * lr.Pitch))[0]) != 0u) ok = 0;            /* outside untouched */
+                IDirect3DSurface9_UnlockRect(cdst);
+                check("d3d9ex", "ComposeRects", ok, "copy 8x8 to (4,4): inside/outside %s", ok ? "ok" : "wrong");
+            }
+            else report("d3d9ex", "ComposeRects", "FAIL", "hr=0x%08lx", hr);
+        }
+        else report("d3d9ex", "ComposeRects", "SKIP", "surface/VB creation failed");
+        if (sd) IDirect3DVertexBuffer9_Release(sd);
+        if (dd) IDirect3DVertexBuffer9_Release(dd);
+        if (csrc) IDirect3DSurface9_Release(csrc);
+        if (cdst) IDirect3DSurface9_Release(cdst);
+    }
 
     if (dev2) IDirect3DDevice9Ex_Release(dev2);
     IDirect3DDevice9Ex_Release(dev);

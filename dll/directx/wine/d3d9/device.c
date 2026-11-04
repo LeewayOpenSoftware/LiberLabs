@@ -4463,16 +4463,115 @@ static HRESULT WINAPI d3d9_device_SetConvolutionMonoKernel(IDirect3DDevice9Ex *i
     return E_NOTIMPL;
 }
 
+struct d3d9_compose_src_desc { USHORT x, y, width, height; };
+struct d3d9_compose_dst_desc { USHORT x, y; };
+
+static UINT d3d9_format_bpp(D3DFORMAT format)
+{
+    switch (format)
+    {
+        case D3DFMT_A8R8G8B8: case D3DFMT_X8R8G8B8: case D3DFMT_A8B8G8R8:
+        case D3DFMT_X8B8G8R8: case D3DFMT_A2R10G10B10: case D3DFMT_A2B10G10R10:
+        case D3DFMT_G16R16:
+            return 4;
+        case D3DFMT_R5G6B5: case D3DFMT_X1R5G5B5: case D3DFMT_A1R5G5B5:
+        case D3DFMT_A4R4G4B4: case D3DFMT_X4R4G4B4: case D3DFMT_A8L8: case D3DFMT_L16:
+            return 2;
+        case D3DFMT_A8: case D3DFMT_L8: case D3DFMT_P8: case D3DFMT_A4L4:
+            return 1;
+        case D3DFMT_A16B16G16R16: case D3DFMT_A16B16G16R16F: case D3DFMT_G32R32F:
+            return 8;
+        case D3DFMT_A32B32G32R32F:
+            return 16;
+        default:
+            return 0;
+    }
+}
+
 static HRESULT WINAPI d3d9_device_ComposeRects(IDirect3DDevice9Ex *iface,
         IDirect3DSurface9 *src_surface, IDirect3DSurface9 *dst_surface, IDirect3DVertexBuffer9 *src_descs,
         UINT rect_count, IDirect3DVertexBuffer9 *dst_descs, D3DCOMPOSERECTSOP operation, INT offset_x, INT offset_y)
 {
-    FIXME("iface %p, src_surface %p, dst_surface %p, src_descs %p, rect_count %u, "
-            "dst_descs %p, operation %#x, offset_x %u, offset_y %u stub!\n",
-            iface, src_surface, dst_surface, src_descs, rect_count,
-            dst_descs, operation, offset_x, offset_y);
+    const struct d3d9_compose_src_desc *src_rects;
+    const struct d3d9_compose_dst_desc *dst_rects;
+    D3DSURFACE_DESC src_desc, dst_desc;
+    D3DLOCKED_RECT src_lock, dst_lock;
+    void *src_vb = NULL, *dst_vb = NULL;
+    UINT bpp, i;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, src_surface %p, dst_surface %p, src_descs %p, rect_count %u, "
+            "dst_descs %p, operation %#x, offset_x %d, offset_y %d.\n",
+            iface, src_surface, dst_surface, src_descs, rect_count, dst_descs, operation, offset_x, offset_y);
+
+    if (!src_surface || !dst_surface || !src_descs || !dst_descs)
+        return D3DERR_INVALIDCALL;
+    if (!rect_count)
+        return D3D_OK;
+    if (operation < D3DCOMPOSERECTS_COPY || operation > D3DCOMPOSERECTS_NEG)
+        return D3DERR_INVALIDCALL;
+
+    if (FAILED(hr = src_surface->lpVtbl->GetDesc(src_surface, &src_desc)))
+        return hr;
+    if (FAILED(hr = dst_surface->lpVtbl->GetDesc(dst_surface, &dst_desc)))
+        return hr;
+    if (src_desc.Format != dst_desc.Format || !(bpp = d3d9_format_bpp(src_desc.Format)))
+        return D3DERR_INVALIDCALL;
+
+    if (FAILED(hr = src_descs->lpVtbl->Lock(src_descs, 0, 0, &src_vb, D3DLOCK_READONLY)))
+        return hr;
+    if (FAILED(hr = dst_descs->lpVtbl->Lock(dst_descs, 0, 0, &dst_vb, D3DLOCK_READONLY)))
+    {
+        src_descs->lpVtbl->Unlock(src_descs);
+        return hr;
+    }
+    src_rects = src_vb;
+    dst_rects = dst_vb;
+
+    if (FAILED(hr = src_surface->lpVtbl->LockRect(src_surface, &src_lock, NULL, D3DLOCK_READONLY)))
+        goto unlock_vb;
+    if (FAILED(hr = dst_surface->lpVtbl->LockRect(dst_surface, &dst_lock, NULL, 0)))
+    {
+        src_surface->lpVtbl->UnlockRect(src_surface);
+        goto unlock_vb;
+    }
+
+    for (i = 0; i < rect_count; ++i)
+    {
+        UINT w = src_rects[i].width, h = src_rects[i].height, row, b, n;
+        INT sx = src_rects[i].x, sy = src_rects[i].y;
+        INT dx = (INT)dst_rects[i].x + offset_x, dy = (INT)dst_rects[i].y + offset_y;
+
+        if (sx < 0 || sy < 0 || sx + (INT)w > (INT)src_desc.Width || sy + (INT)h > (INT)src_desc.Height)
+            continue;
+        if (dx < 0 || dy < 0 || dx + (INT)w > (INT)dst_desc.Width || dy + (INT)h > (INT)dst_desc.Height)
+            continue;
+
+        n = w * bpp;
+        for (row = 0; row < h; ++row)
+        {
+            const BYTE *s = (const BYTE *)src_lock.pBits + (sy + row) * src_lock.Pitch + sx * bpp;
+            BYTE *d = (BYTE *)dst_lock.pBits + (dy + row) * dst_lock.Pitch + dx * bpp;
+
+            switch (operation)
+            {
+                case D3DCOMPOSERECTS_COPY: memcpy(d, s, n); break;
+                case D3DCOMPOSERECTS_OR:  for (b = 0; b < n; ++b) d[b] |= s[b]; break;
+                case D3DCOMPOSERECTS_AND: for (b = 0; b < n; ++b) d[b] &= s[b]; break;
+                case D3DCOMPOSERECTS_NEG: for (b = 0; b < n; ++b) d[b] = (BYTE)~s[b]; break;
+                default: break;
+            }
+        }
+    }
+
+    dst_surface->lpVtbl->UnlockRect(dst_surface);
+    src_surface->lpVtbl->UnlockRect(src_surface);
+    hr = D3D_OK;
+
+unlock_vb:
+    dst_descs->lpVtbl->Unlock(dst_descs);
+    src_descs->lpVtbl->Unlock(src_descs);
+    return hr;
 }
 
 static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_PresentEx(IDirect3DDevice9Ex *iface,

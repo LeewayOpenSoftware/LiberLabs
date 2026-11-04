@@ -2208,20 +2208,48 @@ static HRESULT WINAPI ddraw1_FlipToGDISurface(IDirectDraw *iface)
  *****************************************************************************/
 static HRESULT WINAPI ddraw7_WaitForVerticalBlank(IDirectDraw7 *iface, DWORD Flags, HANDLE event)
 {
-    static BOOL hide;
+    struct ddraw *ddraw = impl_from_IDirectDraw7(iface);
+    struct wined3d_raster_status rs;
+    ULONGLONG deadline;
+    BOOL was_vblank, want_begin;
+    HRESULT hr;
 
     TRACE("iface %p, flags %#lx, event %p.\n", iface, Flags, event);
 
-    /* This function is called often, so print the fixme only once */
-    if(!hide)
-    {
-        FIXME("iface %p, flags %#lx, event %p stub!\n", iface, Flags, event);
-        hide = TRUE;
-    }
-
     /* MSDN says DDWAITVB_BLOCKBEGINEVENT is not supported */
-    if(Flags & DDWAITVB_BLOCKBEGINEVENT)
-        return DDERR_UNSUPPORTED; /* unchecked */
+    if (Flags & DDWAITVB_BLOCKBEGINEVENT)
+        return DDERR_UNSUPPORTED;
+    if (!(Flags & (DDWAITVB_BLOCKBEGIN | DDWAITVB_BLOCKEND)))
+        return DDERR_INVALIDPARAMS;
+
+    want_begin = !!(Flags & DDWAITVB_BLOCKBEGIN);
+
+    wined3d_mutex_lock();
+    hr = wined3d_output_get_raster_status(ddraw->wined3d_output, &rs);
+    wined3d_mutex_unlock();
+    if (FAILED(hr))
+        return DD_OK;
+    was_vblank = rs.in_vblank;
+
+    /* Poll the real raster status for the requested vertical-blank edge, bounded
+     * so a backend that never reports vblank still returns within a few frames. */
+    deadline = GetTickCount64() + 50;
+    for (;;)
+    {
+        wined3d_mutex_lock();
+        hr = wined3d_output_get_raster_status(ddraw->wined3d_output, &rs);
+        wined3d_mutex_unlock();
+        if (FAILED(hr))
+            break;
+        if (want_begin && !was_vblank && rs.in_vblank)
+            break;
+        if (!want_begin && was_vblank && !rs.in_vblank)
+            break;
+        was_vblank = rs.in_vblank;
+        if (GetTickCount64() >= deadline)
+            break;
+        SwitchToThread();
+    }
 
     return DD_OK;
 }
