@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <math.h>
+#include <string.h>
 #include <d2d1.h>
 
 #define TEST_VERSION 1
@@ -176,6 +177,121 @@ done:
     if (out) ID2D1PathGeometry_Release(out);
 }
 
+/* Round caps on a widened line add two half-disks, so the area exceeds the
+ * flat-cap rectangle (80 x 5 = 400). */
+static void test_geometry_widen_roundcap(ID2D1Factory *factory)
+{
+    ID2D1PathGeometry *path = NULL, *widened = NULL;
+    ID2D1GeometrySink *sink = NULL, *wsink = NULL;
+    ID2D1StrokeStyle *style = NULL;
+    D2D1_STROKE_STYLE_PROPERTIES props;
+    D2D1_POINT_2F start = {10.0f, 10.0f}, end = {90.0f, 10.0f};
+    FLOAT area = -1.0f;
+    HRESULT hr;
+
+    memset(&props, 0, sizeof(props));
+    props.startCap = D2D1_CAP_STYLE_ROUND;
+    props.endCap = D2D1_CAP_STYLE_ROUND;
+    props.lineJoin = D2D1_LINE_JOIN_MITER;
+    props.miterLimit = 10.0f;
+    props.dashStyle = D2D1_DASH_STYLE_SOLID;
+
+    if (FAILED(ID2D1Factory_CreatePathGeometry(factory, &path))
+            || FAILED(ID2D1Factory_CreatePathGeometry(factory, &widened))
+            || FAILED(ID2D1Factory_CreateStrokeStyle(factory, &props, NULL, 0, &style)))
+    {
+        report("widen_roundcap", "SKIP", "creation failed");
+        goto done;
+    }
+    if (FAILED(ID2D1PathGeometry_Open(path, &sink)))
+    {
+        report("widen_roundcap", "SKIP", "Open path failed");
+        goto done;
+    }
+    ID2D1GeometrySink_BeginFigure(sink, start, D2D1_FIGURE_BEGIN_FILLED);
+    ID2D1GeometrySink_AddLine(sink, end);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
+    ID2D1GeometrySink_Close(sink);
+    ID2D1GeometrySink_Release(sink);
+    sink = NULL;
+
+    if (FAILED(ID2D1PathGeometry_Open(widened, &wsink)))
+    {
+        report("widen_roundcap", "SKIP", "Open widened failed");
+        goto done;
+    }
+    hr = ID2D1PathGeometry_Widen(path, 5.0f, style, NULL,
+            D2D1_DEFAULT_FLATTENING_TOLERANCE, (ID2D1SimplifiedGeometrySink *)wsink);
+    ID2D1GeometrySink_Close(wsink);
+    ID2D1GeometrySink_Release(wsink);
+    wsink = NULL;
+    if (FAILED(hr))
+    {
+        check("widen_roundcap", FALSE, "Widen hr=%lx", hr);
+        goto done;
+    }
+    hr = ID2D1PathGeometry_ComputeArea(widened, NULL, D2D1_DEFAULT_FLATTENING_TOLERANCE, &area);
+    check("widen_roundcap", SUCCEEDED(hr) && area > 400.0f,
+            "round-cap area hr=%lx area=%.2f (>400 flat-cap rect)", hr, area);
+
+done:
+    if (sink) ID2D1GeometrySink_Release(sink);
+    if (wsink) ID2D1GeometrySink_Release(wsink);
+    if (style) ID2D1StrokeStyle_Release(style);
+    if (path) ID2D1PathGeometry_Release(path);
+    if (widened) ID2D1PathGeometry_Release(widened);
+}
+
+/* UNION of the two rectangles: 10000 + 10000 - 2500 overlap = 17500. */
+static void test_geometry_combine_union(ID2D1Factory *factory)
+{
+    ID2D1RectangleGeometry *ra = NULL, *rb = NULL;
+    ID2D1PathGeometry *out = NULL;
+    ID2D1GeometrySink *sink = NULL;
+    D2D1_RECT_F a = {0.0f, 0.0f, 100.0f, 100.0f};
+    D2D1_RECT_F b = {50.0f, 50.0f, 150.0f, 150.0f};
+    FLOAT area = -1.0f;
+    HRESULT hr;
+
+    if (FAILED(ID2D1Factory_CreateRectangleGeometry(factory, &a, &ra))
+            || FAILED(ID2D1Factory_CreateRectangleGeometry(factory, &b, &rb))
+            || FAILED(ID2D1Factory_CreatePathGeometry(factory, &out)))
+    {
+        report("combine_union", "SKIP", "geometry creation failed");
+        goto done;
+    }
+    if (FAILED(ID2D1PathGeometry_Open(out, &sink)))
+    {
+        report("combine_union", "SKIP", "Open failed");
+        goto done;
+    }
+    hr = ID2D1RectangleGeometry_CombineWithGeometry(ra, (ID2D1Geometry *)rb,
+            D2D1_COMBINE_MODE_UNION, NULL, D2D1_DEFAULT_FLATTENING_TOLERANCE,
+            (ID2D1SimplifiedGeometrySink *)sink);
+    ID2D1GeometrySink_Close(sink);
+    ID2D1GeometrySink_Release(sink);
+    sink = NULL;
+    if (hr == E_NOTIMPL)
+    {
+        report("combine_union", "SKIP", "E_NOTIMPL");
+        goto done;
+    }
+    if (FAILED(hr))
+    {
+        check("combine_union", FALSE, "Combine hr=%lx", hr);
+        goto done;
+    }
+    hr = ID2D1PathGeometry_ComputeArea(out, NULL, D2D1_DEFAULT_FLATTENING_TOLERANCE, &area);
+    check("combine_union", SUCCEEDED(hr) && fabsf(area - 17500.0f) < 100.0f,
+            "area hr=%lx area=%.1f want ~17500", hr, area);
+
+done:
+    if (sink) ID2D1GeometrySink_Release(sink);
+    if (ra) ID2D1RectangleGeometry_Release(ra);
+    if (rb) ID2D1RectangleGeometry_Release(rb);
+    if (out) ID2D1PathGeometry_Release(out);
+}
+
 int main(void)
 {
     d2d_create_factory_func create_factory;
@@ -204,6 +320,8 @@ int main(void)
     test_geometry_computelength(factory);
     test_geometry_widen(factory);
     test_geometry_combine(factory);
+    test_geometry_widen_roundcap(factory);
+    test_geometry_combine_union(factory);
 
     ID2D1Factory_Release(factory);
     printf("D2D_GEOMETRY v%d SUMMARY PASS=%d FAIL=%d SKIP=%d\n", TEST_VERSION, pass_count, fail_count, skip_count);

@@ -4447,15 +4447,111 @@ static void d2d_widen_emit_triangle(ID2D1SimplifiedGeometrySink *sink,
     ID2D1SimplifiedGeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 }
 
-static HRESULT d2d_geometry_widen(ID2D1Geometry *geometry, float stroke_width,
-        const D2D1_MATRIX_3X2_F *transform, float tolerance, ID2D1SimplifiedGeometrySink *sink)
+/* Emit a triangle fan sweeping the short arc between two half-radius vectors. */
+static void d2d_widen_emit_fan(ID2D1SimplifiedGeometrySink *sink, D2D1_POINT_2F c,
+        D2D1_POINT_2F from, D2D1_POINT_2F to, float radius, float tolerance)
 {
+    float a0 = atan2f(from.y, from.x), a1 = atan2f(to.y, to.x), delta = a1 - a0, step, ratio;
+    int n, k;
+
+    while (delta > 3.14159265f) delta -= 6.28318531f;
+    while (delta < -3.14159265f) delta += 6.28318531f;
+    ratio = 1.0f - (tolerance > 0.0f ? tolerance : 0.25f) / (radius > 0.0f ? radius : 1.0f);
+    if (ratio < -1.0f) ratio = -1.0f;
+    if (ratio > 1.0f) ratio = 1.0f;
+    step = 2.0f * acosf(ratio);
+    if (step <= 0.01f) step = 0.01f;
+    n = (int)(fabsf(delta) / step) + 1;
+    if (n > 128) n = 128;
+    for (k = 0; k < n; ++k)
+    {
+        float t0 = a0 + delta * k / n, t1 = a0 + delta * (k + 1) / n;
+        D2D1_POINT_2F p0, p1;
+        p0.x = c.x + radius * cosf(t0); p0.y = c.y + radius * sinf(t0);
+        p1.x = c.x + radius * cosf(t1); p1.y = c.y + radius * sinf(t1);
+        d2d_widen_emit_triangle(sink, c, p0, p1);
+    }
+}
+
+static BOOL d2d_line_intersect(D2D1_POINT_2F a, D2D1_POINT_2F da,
+        D2D1_POINT_2F b, D2D1_POINT_2F db, D2D1_POINT_2F *out)
+{
+    float denom = da.x * db.y - da.y * db.x, t;
+
+    if (fabsf(denom) < 1e-6f)
+        return FALSE;
+    t = ((b.x - a.x) * db.y - (b.y - a.y) * db.x) / denom;
+    out->x = a.x + t * da.x;
+    out->y = a.y + t * da.y;
+    return TRUE;
+}
+
+static void d2d_widen_emit_cap(ID2D1SimplifiedGeometrySink *sink, D2D1_POINT_2F p,
+        D2D1_POINT_2F udir, float half, D2D1_CAP_STYLE cap, float tolerance)
+{
+    D2D1_POINT_2F n, pn, pm, e;
+
+    n.x = -udir.y * half; n.y = udir.x * half;      /* left normal, length half */
+    pn.x = p.x + n.x; pn.y = p.y + n.y;             /* +normal rim */
+    pm.x = p.x - n.x; pm.y = p.y - n.y;             /* -normal rim */
+    e.x = udir.x * half; e.y = udir.y * half;       /* outward extent */
+
+    switch (cap)
+    {
+        case D2D1_CAP_STYLE_SQUARE:
+        {
+            D2D1_POINT_2F q[3];
+            q[0] = pm;
+            q[1].x = pm.x + e.x; q[1].y = pm.y + e.y;
+            q[2].x = pn.x + e.x; q[2].y = pn.y + e.y;
+            ID2D1SimplifiedGeometrySink_BeginFigure(sink, pn, D2D1_FIGURE_BEGIN_FILLED);
+            ID2D1SimplifiedGeometrySink_AddLines(sink, q, 3);
+            ID2D1SimplifiedGeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+            break;
+        }
+        case D2D1_CAP_STYLE_TRIANGLE:
+        {
+            D2D1_POINT_2F tip;
+            tip.x = p.x + e.x; tip.y = p.y + e.y;
+            d2d_widen_emit_triangle(sink, pn, tip, pm);
+            break;
+        }
+        case D2D1_CAP_STYLE_ROUND:
+        {
+            D2D1_POINT_2F mid;
+            mid.x = e.x; mid.y = e.y;                /* vector toward the outward rim */
+            d2d_widen_emit_fan(sink, p, n, mid, half, tolerance);
+            mid.x = -n.x; mid.y = -n.y;
+            d2d_widen_emit_fan(sink, p, e, mid, half, tolerance);
+            break;
+        }
+        default:                                     /* FLAT: nothing */
+            break;
+    }
+}
+
+static HRESULT d2d_geometry_widen(ID2D1Geometry *geometry, float stroke_width,
+        ID2D1StrokeStyle *stroke_style, const D2D1_MATRIX_3X2_F *transform, float tolerance,
+        ID2D1SimplifiedGeometrySink *sink)
+{
+    D2D1_CAP_STYLE start_cap = D2D1_CAP_STYLE_FLAT, end_cap = D2D1_CAP_STYLE_FLAT;
+    D2D1_LINE_JOIN line_join = D2D1_LINE_JOIN_MITER;
+    float half = stroke_width * 0.5f, miter_limit = 10.0f;
     ID2D1PathGeometry *path_geometry;
-    float half = stroke_width * 0.5f;
     HRESULT hr;
 
     if (half <= 0.0f)
         return E_INVALIDARG;
+
+    if (stroke_style)
+    {
+        if (ID2D1StrokeStyle_GetDashStyle(stroke_style) != D2D1_DASH_STYLE_SOLID)
+            return E_NOTIMPL;
+        start_cap = ID2D1StrokeStyle_GetStartCap(stroke_style);
+        end_cap = ID2D1StrokeStyle_GetEndCap(stroke_style);
+        line_join = ID2D1StrokeStyle_GetLineJoin(stroke_style);
+        miter_limit = ID2D1StrokeStyle_GetMiterLimit(stroke_style);
+    }
 
     if (SUCCEEDED(hr = d2d_geometry_get_simplified(geometry, transform, tolerance, &path_geometry)))
     {
@@ -4502,21 +4598,72 @@ static HRESULT d2d_geometry_widen(ID2D1Geometry *geometry, float stroke_width,
                 const D2D1_POINT_2F *prev = &figure->vertices[(j + figure->vertex_count - 1) % figure->vertex_count];
                 const D2D1_POINT_2F *cur = &figure->vertices[j];
                 const D2D1_POINT_2F *next = &figure->vertices[(j + 1) % figure->vertex_count];
-                D2D1_POINT_2F d0, d1, n0, n1, p0p, p0m, p1p, p1m;
-                float l0, l1;
+                D2D1_POINT_2F d0, d1, n0, n1, oa, ob;
+                float l0, l1, cross, s;
 
                 d2d_point_subtract(&d0, cur, prev);
                 d2d_point_subtract(&d1, next, cur);
                 if ((l0 = d2d_point_length(&d0)) == 0.0f || (l1 = d2d_point_length(&d1)) == 0.0f)
                     continue;
-                n0.x = -d0.y / l0 * half; n0.y = d0.x / l0 * half;
-                n1.x = -d1.y / l1 * half; n1.y = d1.x / l1 * half;
-                p0p.x = cur->x + n0.x; p0p.y = cur->y + n0.y;
-                p1p.x = cur->x + n1.x; p1p.y = cur->y + n1.y;
-                p0m.x = cur->x - n0.x; p0m.y = cur->y - n0.y;
-                p1m.x = cur->x - n1.x; p1m.y = cur->y - n1.y;
-                d2d_widen_emit_triangle(sink, *cur, p0p, p1p);
-                d2d_widen_emit_triangle(sink, *cur, p0m, p1m);
+                d0.x /= l0; d0.y /= l0;
+                d1.x /= l1; d1.y /= l1;
+                cross = d0.x * d1.y - d0.y * d1.x;
+                if (fabsf(cross) < 1e-6f)
+                    continue;                           /* collinear: no join gap */
+                s = cross > 0.0f ? -half : half;        /* outer side */
+                n0.x = -d0.y * s; n0.y = d0.x * s;
+                n1.x = -d1.y * s; n1.y = d1.x * s;
+                oa.x = cur->x + n0.x; oa.y = cur->y + n0.y;
+                ob.x = cur->x + n1.x; ob.y = cur->y + n1.y;
+
+                if (line_join == D2D1_LINE_JOIN_ROUND)
+                {
+                    d2d_widen_emit_fan(sink, *cur, n0, n1, half, tolerance);
+                }
+                else if (line_join == D2D1_LINE_JOIN_MITER || line_join == D2D1_LINE_JOIN_MITER_OR_BEVEL)
+                {
+                    D2D1_POINT_2F m, mv;
+                    float ratio;
+
+                    if (d2d_line_intersect(oa, d0, ob, d1, &m))
+                    {
+                        mv.x = m.x - cur->x; mv.y = m.y - cur->y;
+                        ratio = d2d_point_length(&mv) / half;
+                        if (ratio <= miter_limit)
+                        {
+                            d2d_widen_emit_triangle(sink, *cur, oa, m);
+                            d2d_widen_emit_triangle(sink, *cur, m, ob);
+                        }
+                        else d2d_widen_emit_triangle(sink, *cur, oa, ob);
+                    }
+                    else d2d_widen_emit_triangle(sink, *cur, oa, ob);
+                }
+                else /* BEVEL */
+                {
+                    d2d_widen_emit_triangle(sink, *cur, oa, ob);
+                }
+            }
+
+            if (!closed && figure->vertex_count >= 2)
+            {
+                const D2D1_POINT_2F *v0 = &figure->vertices[0], *v1 = &figure->vertices[1];
+                const D2D1_POINT_2F *w0 = &figure->vertices[figure->vertex_count - 2];
+                const D2D1_POINT_2F *w1 = &figure->vertices[figure->vertex_count - 1];
+                D2D1_POINT_2F u;
+                float l;
+
+                d2d_point_subtract(&u, v0, v1);         /* start cap points backward */
+                if ((l = d2d_point_length(&u)) != 0.0f)
+                {
+                    u.x /= l; u.y /= l;
+                    d2d_widen_emit_cap(sink, *v0, u, half, start_cap, tolerance);
+                }
+                d2d_point_subtract(&u, w1, w0);         /* end cap points forward */
+                if ((l = d2d_point_length(&u)) != 0.0f)
+                {
+                    u.x /= l; u.y /= l;
+                    d2d_widen_emit_cap(sink, *w1, u, half, end_cap, tolerance);
+                }
             }
         }
 
@@ -4854,7 +5001,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Widen(ID2D1PathGeometry1 *ifa
     if (!sink)
         return E_INVALIDARG;
 
-    return d2d_geometry_widen(&geometry->ID2D1Geometry_iface, stroke_width, transform, tolerance, sink);
+    return d2d_geometry_widen(&geometry->ID2D1Geometry_iface, stroke_width, stroke_style, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Open(ID2D1PathGeometry1 *iface, ID2D1GeometrySink **sink)
@@ -5325,10 +5472,15 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_CombineWithGeometry(ID2D1E
         ID2D1Geometry *geometry, D2D1_COMBINE_MODE combine_mode, const D2D1_MATRIX_3X2_F *transform,
         float tolerance, ID2D1SimplifiedGeometrySink *sink)
 {
-    FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
+    struct d2d_geometry *geom = impl_from_ID2D1EllipseGeometry(iface);
+
+    TRACE("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p.\n",
             iface, geometry, combine_mode, transform, tolerance, sink);
 
-    return E_NOTIMPL;
+    if (!geometry || !sink)
+        return E_INVALIDARG;
+
+    return d2d_geometry_combine(&geom->ID2D1Geometry_iface, geometry, combine_mode, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_Outline(ID2D1EllipseGeometry *iface,
@@ -6183,10 +6335,15 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_CombineWithGeome
         ID2D1RoundedRectangleGeometry *iface, ID2D1Geometry *geometry, D2D1_COMBINE_MODE combine_mode,
         const D2D1_MATRIX_3X2_F *transform, float tolerance, ID2D1SimplifiedGeometrySink *sink)
 {
-    FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
+    struct d2d_geometry *geom = impl_from_ID2D1RoundedRectangleGeometry(iface);
+
+    TRACE("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p.\n",
             iface, geometry, combine_mode, transform, tolerance, sink);
 
-    return E_NOTIMPL;
+    if (!geometry || !sink)
+        return E_INVALIDARG;
+
+    return d2d_geometry_combine(&geom->ID2D1Geometry_iface, geometry, combine_mode, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_Outline(ID2D1RoundedRectangleGeometry *iface,
@@ -6585,10 +6742,15 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_CombineWithGeometry(ID
         ID2D1Geometry *geometry, D2D1_COMBINE_MODE combine_mode, const D2D1_MATRIX_3X2_F *transform,
         float tolerance, ID2D1SimplifiedGeometrySink *sink)
 {
-    FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
+    struct d2d_geometry *geom = impl_from_ID2D1TransformedGeometry(iface);
+
+    TRACE("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p.\n",
             iface, geometry, combine_mode, transform, tolerance, sink);
 
-    return E_NOTIMPL;
+    if (!geometry || !sink)
+        return E_INVALIDARG;
+
+    return d2d_geometry_combine(&geom->ID2D1Geometry_iface, geometry, combine_mode, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_Outline(ID2D1TransformedGeometry *iface,
