@@ -4526,6 +4526,257 @@ static HRESULT d2d_geometry_widen(ID2D1Geometry *geometry, float stroke_width,
     return hr;
 }
 
+/* Scanline boolean of two flattened geometries. Each figure is treated as a
+ * closed filled contour; within a horizontal band bounded by all vertex and
+ * edge-crossing y values the arrangement is stable, so per-operand coverage
+ * (non-zero winding) is computed from the edges spanning the band and combined
+ * per mode into trapezoids emitted to the sink under winding fill. Over-complex
+ * input (beyond the fixed scratch bounds) returns E_NOTIMPL honestly. */
+struct d2d_combine_edge
+{
+    float y0, y1, x0, x1;
+};
+
+static float d2d_combine_edge_x(const struct d2d_combine_edge *e, float y)
+{
+    if (e->y1 == e->y0)
+        return e->x0;
+    return e->x0 + (e->x1 - e->x0) * (y - e->y0) / (e->y1 - e->y0);
+}
+
+static BOOL d2d_combine_collect_edges(struct d2d_geometry *path_impl,
+        struct d2d_combine_edge **edges, size_t *count, size_t *capacity)
+{
+    size_t i, k;
+
+    for (i = 0; i < path_impl->u.path.figure_count; ++i)
+    {
+        const struct d2d_figure *figure = &path_impl->u.path.figures[i];
+
+        if (figure->vertex_count < 2)
+            continue;
+        for (k = 0; k < figure->vertex_count; ++k)
+        {
+            const D2D1_POINT_2F *a = &figure->vertices[k];
+            const D2D1_POINT_2F *b = &figure->vertices[(k + 1) % figure->vertex_count];
+            struct d2d_combine_edge *e;
+
+            if (a->y == b->y)
+                continue;
+            if (!d2d_array_reserve((void **)edges, capacity, *count + 1, sizeof(**edges)))
+                return FALSE;
+            e = &(*edges)[(*count)++];
+            if (a->y < b->y) { e->y0 = a->y; e->x0 = a->x; e->y1 = b->y; e->x1 = b->x; }
+            else             { e->y0 = b->y; e->x0 = b->x; e->y1 = a->y; e->x1 = a->x; }
+        }
+    }
+    return TRUE;
+}
+
+/* One operand's covered x-intervals at scan line y, as bounding edge pointers. */
+struct d2d_combine_span { const struct d2d_combine_edge *left, *right; };
+
+static size_t d2d_combine_coverage(const struct d2d_combine_edge *edges, size_t edge_count,
+        float y, struct d2d_combine_span *spans, size_t max_spans)
+{
+    const struct d2d_combine_edge *cross[256];
+    float cx[256];
+    size_t n = 0, i, j, span_count = 0;
+
+    for (i = 0; i < edge_count; ++i)
+    {
+        if (edges[i].y0 < y && y < edges[i].y1)
+        {
+            if (n >= sizeof(cross) / sizeof(cross[0]))
+                return (size_t)-1;
+            cross[n] = &edges[i];
+            cx[n] = d2d_combine_edge_x(&edges[i], y);
+            ++n;
+        }
+    }
+    for (i = 1; i < n; ++i)
+    {
+        const struct d2d_combine_edge *te = cross[i];
+        float tx = cx[i];
+        for (j = i; j > 0 && cx[j - 1] > tx; --j)
+        {
+            cx[j] = cx[j - 1];
+            cross[j] = cross[j - 1];
+        }
+        cx[j] = tx;
+        cross[j] = te;
+    }
+    /* Non-zero winding: with y-sorted edges, each successive crossing toggles
+     * inside/outside; pair them into intervals. */
+    for (i = 0; i + 1 < n; i += 2)
+    {
+        if (span_count >= max_spans)
+            return (size_t)-1;
+        spans[span_count].left = cross[i];
+        spans[span_count].right = cross[i + 1];
+        ++span_count;
+    }
+    return span_count;
+}
+
+static HRESULT d2d_geometry_combine(ID2D1Geometry *geometry, ID2D1Geometry *other,
+        D2D1_COMBINE_MODE mode, const D2D1_MATRIX_3X2_F *transform, float tolerance,
+        ID2D1SimplifiedGeometrySink *sink)
+{
+    struct d2d_combine_edge *ea = NULL, *eb = NULL;
+    size_t ca = 0, cap_a = 0, cb = 0, cap_b = 0;
+    ID2D1PathGeometry *sa = NULL, *sb = NULL;
+    float *ys = NULL;
+    size_t ys_count = 0, ys_cap = 0, i, j, b;
+    HRESULT hr;
+
+    if (FAILED(hr = d2d_geometry_get_simplified(geometry, NULL, tolerance, &sa)))
+        return hr;
+    if (FAILED(hr = d2d_geometry_get_simplified(other, transform, tolerance, &sb)))
+    {
+        ID2D1PathGeometry_Release(sa);
+        return hr;
+    }
+
+    if (!d2d_combine_collect_edges(unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)sa), &ea, &ca, &cap_a)
+            || !d2d_combine_collect_edges(unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)sb), &eb, &cb, &cap_b))
+    {
+        hr = E_OUTOFMEMORY;
+        goto done;
+    }
+
+    /* Band boundaries: every edge endpoint y, plus every A-B edge crossing y. */
+    for (i = 0; i < ca + cb; ++i)
+    {
+        const struct d2d_combine_edge *e = i < ca ? &ea[i] : &eb[i - ca];
+        if (!d2d_array_reserve((void **)&ys, &ys_cap, ys_count + 2, sizeof(*ys)))
+        { hr = E_OUTOFMEMORY; goto done; }
+        ys[ys_count++] = e->y0;
+        ys[ys_count++] = e->y1;
+    }
+    for (i = 0; i < ca; ++i)
+    {
+        for (j = 0; j < cb; ++j)
+        {
+            float y0 = max(ea[i].y0, eb[j].y0), y1 = min(ea[i].y1, eb[j].y1), ym, dx;
+            if (y0 >= y1)
+                continue;
+            ym = 0.5f * (y0 + y1);
+            dx = d2d_combine_edge_x(&ea[i], ym) - d2d_combine_edge_x(&eb[j], ym);
+            if (fabsf(dx) > 1e4f)
+                continue;
+            /* bisect for the crossing y of the two linear edges over [y0,y1] */
+            {
+                float lo = y0, hi = y1, f_lo = d2d_combine_edge_x(&ea[i], lo) - d2d_combine_edge_x(&eb[j], lo);
+                int it;
+                for (it = 0; it < 40; ++it)
+                {
+                    float mid = 0.5f * (lo + hi), f_mid = d2d_combine_edge_x(&ea[i], mid) - d2d_combine_edge_x(&eb[j], mid);
+                    if ((f_lo < 0.0f) == (f_mid < 0.0f)) { lo = mid; f_lo = f_mid; }
+                    else hi = mid;
+                }
+                if (!d2d_array_reserve((void **)&ys, &ys_cap, ys_count + 1, sizeof(*ys)))
+                { hr = E_OUTOFMEMORY; goto done; }
+                ys[ys_count++] = 0.5f * (lo + hi);
+            }
+        }
+    }
+
+    /* sort band boundaries ascending (insertion sort; small n) */
+    for (i = 1; i < ys_count; ++i)
+    {
+        float t = ys[i];
+        for (j = i; j > 0 && ys[j - 1] > t; --j)
+            ys[j] = ys[j - 1];
+        ys[j] = t;
+    }
+
+    ID2D1SimplifiedGeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
+
+    for (b = 0; b + 1 < ys_count; ++b)
+    {
+        float y0 = ys[b], y1 = ys[b + 1], ym;
+        struct d2d_combine_span sa_spans[128], sb_spans[128];
+        size_t na, nb, ai, bi;
+        int in_a, in_b;
+        const struct d2d_combine_edge *res_left = NULL;
+
+        if (y1 - y0 < 1e-6f)
+            continue;
+        ym = 0.5f * (y0 + y1);
+
+        na = d2d_combine_coverage(ea, ca, ym, sa_spans, sizeof(sa_spans) / sizeof(sa_spans[0]));
+        nb = d2d_combine_coverage(eb, cb, ym, sb_spans, sizeof(sb_spans) / sizeof(sb_spans[0]));
+        if (na == (size_t)-1 || nb == (size_t)-1)
+        {
+            hr = E_NOTIMPL;
+            goto done;
+        }
+
+        /* Merge A and B spans along x, flipping the per-mode predicate. */
+        ai = bi = 0;
+        in_a = in_b = 0;
+        while (ai < na || bi < nb)
+        {
+            const struct d2d_combine_edge *edge = NULL;
+            float x_a_l = ai < na ? d2d_combine_edge_x(sa_spans[ai].left, ym) : 0.0f;
+            float x_a_r = ai < na ? d2d_combine_edge_x(sa_spans[ai].right, ym) : 0.0f;
+            float x_b_l = bi < nb ? d2d_combine_edge_x(sb_spans[bi].left, ym) : 0.0f;
+            float x_b_r = bi < nb ? d2d_combine_edge_x(sb_spans[bi].right, ym) : 0.0f;
+            float best = 0.0f;
+            int which = 0, entering = 0, prev;
+
+            /* pick the next boundary x across A-start/A-end/B-start/B-end */
+            best = 3.4e38f;
+            if (ai < na && !in_a && x_a_l <= best) { best = x_a_l; which = 1; entering = 1; }
+            if (ai < na &&  in_a && x_a_r <= best) { best = x_a_r; which = 1; entering = 0; }
+            if (bi < nb && !in_b && x_b_l <= best) { best = x_b_l; which = 2; entering = 1; }
+            if (bi < nb &&  in_b && x_b_r <= best) { best = x_b_r; which = 2; entering = 0; }
+
+            if (!which)
+                break;
+
+            prev = (mode == D2D1_COMBINE_MODE_INTERSECT) ? (in_a && in_b)
+                 : (mode == D2D1_COMBINE_MODE_UNION)     ? (in_a || in_b)
+                 : (mode == D2D1_COMBINE_MODE_XOR)       ? (in_a != in_b)
+                 : (in_a && !in_b);
+            if (which == 1) { in_a = entering; edge = entering ? sa_spans[ai].left : sa_spans[ai].right; if (!entering) ++ai; }
+            else            { in_b = entering; edge = entering ? sb_spans[bi].left : sb_spans[bi].right; if (!entering) ++bi; }
+            {
+                int now = (mode == D2D1_COMBINE_MODE_INTERSECT) ? (in_a && in_b)
+                        : (mode == D2D1_COMBINE_MODE_UNION)     ? (in_a || in_b)
+                        : (mode == D2D1_COMBINE_MODE_XOR)       ? (in_a != in_b)
+                        : (in_a && !in_b);
+                if (!prev && now)
+                    res_left = edge;
+                else if (prev && !now && res_left)
+                {
+                    D2D1_POINT_2F p0, p1, p2, p3, rest[3];
+                    p0.x = d2d_combine_edge_x(res_left, y0); p0.y = y0;
+                    p1.x = d2d_combine_edge_x(edge, y0);     p1.y = y0;
+                    p2.x = d2d_combine_edge_x(edge, y1);     p2.y = y1;
+                    p3.x = d2d_combine_edge_x(res_left, y1); p3.y = y1;
+                    rest[0] = p1; rest[1] = p2; rest[2] = p3;
+                    ID2D1SimplifiedGeometrySink_BeginFigure(sink, p0, D2D1_FIGURE_BEGIN_FILLED);
+                    ID2D1SimplifiedGeometrySink_AddLines(sink, rest, 3);
+                    ID2D1SimplifiedGeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+                    res_left = NULL;
+                }
+            }
+        }
+    }
+
+    hr = S_OK;
+
+done:
+    free(ea);
+    free(eb);
+    free(ys);
+    if (sa) ID2D1PathGeometry_Release(sa);
+    if (sb) ID2D1PathGeometry_Release(sb);
+    return hr;
+}
+
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Tessellate(ID2D1PathGeometry1 *iface,
         const D2D1_MATRIX_3X2_F *transform, float tolerance, ID2D1TessellationSink *sink)
 {
@@ -4540,10 +4791,15 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_CombineWithGeometry(ID2D1Path
         ID2D1Geometry *geometry, D2D1_COMBINE_MODE combine_mode, const D2D1_MATRIX_3X2_F *transform,
         float tolerance, ID2D1SimplifiedGeometrySink *sink)
 {
-    FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
+    struct d2d_geometry *geom = impl_from_ID2D1PathGeometry1(iface);
+
+    TRACE("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p.\n",
             iface, geometry, combine_mode, transform, tolerance, sink);
 
-    return E_NOTIMPL;
+    if (!geometry || !sink)
+        return E_INVALIDARG;
+
+    return d2d_geometry_combine(&geom->ID2D1Geometry_iface, geometry, combine_mode, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Outline(ID2D1PathGeometry1 *iface,
@@ -5520,10 +5776,15 @@ static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_CombineWithGeometry(ID2D
         ID2D1Geometry *geometry, D2D1_COMBINE_MODE combine_mode, const D2D1_MATRIX_3X2_F *transform,
         float tolerance, ID2D1SimplifiedGeometrySink *sink)
 {
-    FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
+    struct d2d_geometry *geom = impl_from_ID2D1RectangleGeometry(iface);
+
+    TRACE("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p.\n",
             iface, geometry, combine_mode, transform, tolerance, sink);
 
-    return E_NOTIMPL;
+    if (!geometry || !sink)
+        return E_INVALIDARG;
+
+    return d2d_geometry_combine(&geom->ID2D1Geometry_iface, geometry, combine_mode, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_Outline(ID2D1RectangleGeometry *iface,
