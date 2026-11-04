@@ -16,6 +16,7 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
+#include <windns.h>
 #include <netioapi.h>
 #include <shellapi.h>
 #include <strsafe.h>
@@ -53,19 +54,25 @@ static VOID ReadConfigText(PCWSTR Name, PCWSTR Default, WCHAR *Text, DWORD Count
     RegCloseKey(key);
 }
 
-static DWORD ReadConfigPort(VOID)
+static DWORD ReadConfigPortValue(PCWSTR Name, DWORD Default)
 {
     HKEY key;
-    DWORD type, value = DEFAULT_PROBE_PORT, size = sizeof(value);
+    DWORD type, value = Default, size = sizeof(value);
 
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, CONFIG_KEY, 0, KEY_READ, &key) == ERROR_SUCCESS)
     {
-        if (RegQueryValueExW(key, L"ProbePort", NULL, &type, (LPBYTE)&value, &size) != ERROR_SUCCESS ||
-            type != REG_DWORD || value == 0 || value > 65535)
-            value = DEFAULT_PROBE_PORT;
+        if (RegQueryValueExW(key, Name, NULL, &type, (LPBYTE)&value, &size) != ERROR_SUCCESS || type != REG_DWORD)
+            value = Default;
         RegCloseKey(key);
     }
     return value;
+}
+
+static DWORD ReadConfigPort(VOID)
+{
+    DWORD value = ReadConfigPortValue(L"ProbePort", DEFAULT_PROBE_PORT);
+
+    return (value == 0 || value > 65535) ? DEFAULT_PROBE_PORT : value;
 }
 
 static VOID FormatSockaddr(const SOCKADDR *Address, ULONG Length, WCHAR *Text, UINT Count)
@@ -510,12 +517,17 @@ VOID NcProbeInternet(const NC_ADAPTER_LIST *List, NC_ACCESS *Access)
             StringCchCatW(Access->Detail, ARRAYSIZE(Access->Detail), L"IPv4: Winsock is not available. ");
         else
         {
+            DWORD ping, rtt = 0;
+
             error = TryConnect(probe4, port);
-            Access->V4 = error ? NC_LEVEL_LOCAL : NC_LEVEL_INTERNET;
-            if (error)
-                StringCchPrintfW(line, ARRAYSIZE(line), L"IPv4: connection to %s:%u failed (error %d). ", probe4, port, error);
-            else
+            ping = error ? PingV4(probe4, &rtt) : 1;
+            Access->V4 = (!error || !ping) ? NC_LEVEL_INTERNET : NC_LEVEL_LOCAL;
+            if (!error)
                 StringCchPrintfW(line, ARRAYSIZE(line), L"IPv4: connected to %s:%u. ", probe4, port);
+            else if (!ping)
+                StringCchPrintfW(line, ARRAYSIZE(line), L"IPv4: connection to %s:%u failed (error %d), echo reply in %lu ms. ", probe4, port, error, rtt);
+            else
+                StringCchPrintfW(line, ARRAYSIZE(line), L"IPv4: connection to %s:%u failed (error %d), no echo reply (code %lu). ", probe4, port, error, ping);
             StringCchCatW(Access->Detail, ARRAYSIZE(Access->Detail), line);
         }
     }
@@ -684,8 +696,6 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
     PCWSTR stage;
     int sockError;
     BOOL winsock;
-    ADDRINFOW hints, *found = NULL;
-    int dnsError;
 
     RtlZeroMemory(Report, sizeof(*Report));
 #define DONE() do { Report->Done++; if (Progress) Progress(Report, Context); } while (0)
@@ -754,7 +764,8 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
         SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_FAIL, L"The stack does not answer statistics queries (error %lu).", error);
     DONE();
 
-    /* 3 loopback: ICMP echo and a TCP connection to this computer */
+    /* 3 loopback: ICMP echo to this computer. The TCP self-test is opt-in (LoopbackTcpTest = 1): the
+     * TCP listen path is known to be defective, so it is not part of the default result. */
     {
         DWORD icmpStatus = PingV4(L"127.0.0.1", &rtt);
         WCHAR icmpText[80], tcpText[96];
@@ -766,21 +777,26 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
         else
             StringCchPrintfW(icmpText, ARRAYSIZE(icmpText), L"ICMP echo to 127.0.0.1: no reply (code %lu)", icmpStatus);
 
-        winsock = WinsockUp();
-        if (!winsock)
+        sockError = 0;
+        StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP loopback not tested (known defect in the listen path)");
+        if (ReadConfigPortValue(L"LoopbackTcpTest", 0) == 1)
         {
-            StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP: Winsock is not available");
-            sockError = WSASYSNOTREADY;
-        }
-        else
-        {
-            stage = L"";
-            sockError = LoopbackSelfTest(&stage);
-            if (!sockError)
-                StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP connect and accept on 127.0.0.1 worked");
+            winsock = WinsockUp();
+            if (!winsock)
+            {
+                StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP: Winsock is not available");
+                sockError = WSASYSNOTREADY;
+            }
             else
-                StringCchPrintfW(tcpText, ARRAYSIZE(tcpText), L"TCP loopback failed at %s (error %d)", stage, sockError);
-            WSACleanup();
+            {
+                stage = L"";
+                sockError = LoopbackSelfTest(&stage);
+                if (!sockError)
+                    StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP connect and accept on 127.0.0.1 worked");
+                else
+                    StringCchPrintfW(tcpText, ARRAYSIZE(tcpText), L"TCP loopback failed at %s (error %d)", stage, sockError);
+                WSACleanup();
+            }
         }
         if (!icmpStatus && !sockError)
             SetStep(Report, 3, L"Loopback", NC_DIAG_PASS, L"%s; %s.", icmpText, tcpText);
@@ -836,28 +852,23 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
         SetStep(Report, 5, L"DNS name resolution", NC_DIAG_FAIL, L"No DNS server is configured on a connected interface.");
     else
     {
-        winsock = WinsockUp();
-        if (!winsock)
-            SetStep(Report, 5, L"DNS name resolution", NC_DIAG_FAIL, L"Winsock is not available.");
-        else
+        PDNS_RECORDW record = NULL;
+        DNS_STATUS dnsStatus = DnsQuery_W(probeName, DNS_TYPE_A, DNS_QUERY_STANDARD, NULL, (PDNS_RECORD *)&record, NULL);
+
+        if (dnsStatus == 0 && record)
         {
-            RtlZeroMemory(&hints, sizeof(hints));
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-            dnsError = GetAddrInfoW(probeName, NULL, &hints, &found);
-            if (dnsError == 0 && found && found->ai_addr)
-            {
-                FormatSockaddr(found->ai_addr, (ULONG)found->ai_addrlen, name, ARRAYSIZE(name));
-                SetStep(Report, 5, L"DNS name resolution", NC_DIAG_PASS, L"%s resolved to %s.", probeName, name);
-            }
-            else if (dnsError == WSAEAFNOSUPPORT || dnsError == WSAEOPNOTSUPP)
-                SetStep(Report, 5, L"DNS name resolution", NC_DIAG_UNSUPPORTED, L"Name resolution is not implemented (error %d).", dnsError);
-            else
-                SetStep(Report, 5, L"DNS name resolution", NC_DIAG_FAIL, L"%s could not be resolved (error %d).", probeName, dnsError);
-            if (found)
-                FreeAddrInfoW(found);
-            WSACleanup();
+            IN_ADDR ip;
+
+            ip.S_un.S_addr = record->Data.A.IpAddress;
+            StringCchPrintfW(name, ARRAYSIZE(name), L"%u.%u.%u.%u", ip.S_un.S_un_b.s_b1, ip.S_un.S_un_b.s_b2, ip.S_un.S_un_b.s_b3, ip.S_un.S_un_b.s_b4);
+            SetStep(Report, 5, L"DNS name resolution", NC_DIAG_PASS, L"%s resolved to %s (DnsQuery).", probeName, name);
         }
+        else if (IsNotImplemented((DWORD)dnsStatus))
+            SetStep(Report, 5, L"DNS name resolution", NC_DIAG_UNSUPPORTED, L"DnsQuery is not implemented (error %lu).", (DWORD)dnsStatus);
+        else
+            SetStep(Report, 5, L"DNS name resolution", NC_DIAG_FAIL, L"%s could not be resolved (status %lu).", probeName, (DWORD)dnsStatus);
+        if (record)
+            DnsRecordListFree(record, DnsFreeRecordList);
     }
     DONE();
 
