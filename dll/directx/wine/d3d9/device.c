@@ -4463,16 +4463,115 @@ static HRESULT WINAPI d3d9_device_SetConvolutionMonoKernel(IDirect3DDevice9Ex *i
     return E_NOTIMPL;
 }
 
+struct d3d9_compose_src_desc { USHORT x, y, width, height; };
+struct d3d9_compose_dst_desc { USHORT x, y; };
+
+static UINT d3d9_format_bpp(D3DFORMAT format)
+{
+    switch (format)
+    {
+        case D3DFMT_A8R8G8B8: case D3DFMT_X8R8G8B8: case D3DFMT_A8B8G8R8:
+        case D3DFMT_X8B8G8R8: case D3DFMT_A2R10G10B10: case D3DFMT_A2B10G10R10:
+        case D3DFMT_G16R16:
+            return 4;
+        case D3DFMT_R5G6B5: case D3DFMT_X1R5G5B5: case D3DFMT_A1R5G5B5:
+        case D3DFMT_A4R4G4B4: case D3DFMT_X4R4G4B4: case D3DFMT_A8L8: case D3DFMT_L16:
+            return 2;
+        case D3DFMT_A8: case D3DFMT_L8: case D3DFMT_P8: case D3DFMT_A4L4:
+            return 1;
+        case D3DFMT_A16B16G16R16: case D3DFMT_A16B16G16R16F: case D3DFMT_G32R32F:
+            return 8;
+        case D3DFMT_A32B32G32R32F:
+            return 16;
+        default:
+            return 0;
+    }
+}
+
 static HRESULT WINAPI d3d9_device_ComposeRects(IDirect3DDevice9Ex *iface,
         IDirect3DSurface9 *src_surface, IDirect3DSurface9 *dst_surface, IDirect3DVertexBuffer9 *src_descs,
         UINT rect_count, IDirect3DVertexBuffer9 *dst_descs, D3DCOMPOSERECTSOP operation, INT offset_x, INT offset_y)
 {
-    FIXME("iface %p, src_surface %p, dst_surface %p, src_descs %p, rect_count %u, "
-            "dst_descs %p, operation %#x, offset_x %u, offset_y %u stub!\n",
-            iface, src_surface, dst_surface, src_descs, rect_count,
-            dst_descs, operation, offset_x, offset_y);
+    const struct d3d9_compose_src_desc *src_rects;
+    const struct d3d9_compose_dst_desc *dst_rects;
+    D3DSURFACE_DESC src_desc, dst_desc;
+    D3DLOCKED_RECT src_lock, dst_lock;
+    void *src_vb = NULL, *dst_vb = NULL;
+    UINT bpp, i;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, src_surface %p, dst_surface %p, src_descs %p, rect_count %u, "
+            "dst_descs %p, operation %#x, offset_x %d, offset_y %d.\n",
+            iface, src_surface, dst_surface, src_descs, rect_count, dst_descs, operation, offset_x, offset_y);
+
+    if (!src_surface || !dst_surface || !src_descs || !dst_descs)
+        return D3DERR_INVALIDCALL;
+    if (!rect_count)
+        return D3D_OK;
+    if (operation < D3DCOMPOSERECTS_COPY || operation > D3DCOMPOSERECTS_NEG)
+        return D3DERR_INVALIDCALL;
+
+    if (FAILED(hr = src_surface->lpVtbl->GetDesc(src_surface, &src_desc)))
+        return hr;
+    if (FAILED(hr = dst_surface->lpVtbl->GetDesc(dst_surface, &dst_desc)))
+        return hr;
+    if (src_desc.Format != dst_desc.Format || !(bpp = d3d9_format_bpp(src_desc.Format)))
+        return D3DERR_INVALIDCALL;
+
+    if (FAILED(hr = src_descs->lpVtbl->Lock(src_descs, 0, 0, &src_vb, D3DLOCK_READONLY)))
+        return hr;
+    if (FAILED(hr = dst_descs->lpVtbl->Lock(dst_descs, 0, 0, &dst_vb, D3DLOCK_READONLY)))
+    {
+        src_descs->lpVtbl->Unlock(src_descs);
+        return hr;
+    }
+    src_rects = src_vb;
+    dst_rects = dst_vb;
+
+    if (FAILED(hr = src_surface->lpVtbl->LockRect(src_surface, &src_lock, NULL, D3DLOCK_READONLY)))
+        goto unlock_vb;
+    if (FAILED(hr = dst_surface->lpVtbl->LockRect(dst_surface, &dst_lock, NULL, 0)))
+    {
+        src_surface->lpVtbl->UnlockRect(src_surface);
+        goto unlock_vb;
+    }
+
+    for (i = 0; i < rect_count; ++i)
+    {
+        UINT w = src_rects[i].width, h = src_rects[i].height, row, b, n;
+        INT sx = src_rects[i].x, sy = src_rects[i].y;
+        INT dx = (INT)dst_rects[i].x + offset_x, dy = (INT)dst_rects[i].y + offset_y;
+
+        if (sx < 0 || sy < 0 || sx + (INT)w > (INT)src_desc.Width || sy + (INT)h > (INT)src_desc.Height)
+            continue;
+        if (dx < 0 || dy < 0 || dx + (INT)w > (INT)dst_desc.Width || dy + (INT)h > (INT)dst_desc.Height)
+            continue;
+
+        n = w * bpp;
+        for (row = 0; row < h; ++row)
+        {
+            const BYTE *s = (const BYTE *)src_lock.pBits + (sy + row) * src_lock.Pitch + sx * bpp;
+            BYTE *d = (BYTE *)dst_lock.pBits + (dy + row) * dst_lock.Pitch + dx * bpp;
+
+            switch (operation)
+            {
+                case D3DCOMPOSERECTS_COPY: memcpy(d, s, n); break;
+                case D3DCOMPOSERECTS_OR:  for (b = 0; b < n; ++b) d[b] |= s[b]; break;
+                case D3DCOMPOSERECTS_AND: for (b = 0; b < n; ++b) d[b] &= s[b]; break;
+                case D3DCOMPOSERECTS_NEG: for (b = 0; b < n; ++b) d[b] = (BYTE)~s[b]; break;
+                default: break;
+            }
+        }
+    }
+
+    dst_surface->lpVtbl->UnlockRect(dst_surface);
+    src_surface->lpVtbl->UnlockRect(src_surface);
+    hr = D3D_OK;
+
+unlock_vb:
+    dst_descs->lpVtbl->Unlock(dst_descs);
+    src_descs->lpVtbl->Unlock(src_descs);
+    return hr;
 }
 
 static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_PresentEx(IDirect3DDevice9Ex *iface,
@@ -4512,32 +4611,80 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_PresentEx(IDirect3DDevice9Ex
 
 static HRESULT WINAPI d3d9_device_GetGPUThreadPriority(IDirect3DDevice9Ex *iface, INT *priority)
 {
-    FIXME("iface %p, priority %p stub!\n", iface, priority);
+    struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, priority %p.\n", iface, priority);
+
+    if (!priority)
+        return D3DERR_INVALIDCALL;
+
+    wined3d_mutex_lock();
+    *priority = device->gpu_thread_priority;
+    wined3d_mutex_unlock();
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_SetGPUThreadPriority(IDirect3DDevice9Ex *iface, INT priority)
 {
-    FIXME("iface %p, priority %d stub!\n", iface, priority);
+    struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, priority %d.\n", iface, priority);
+
+    if (priority < -7 || priority > 7)
+        return D3DERR_INVALIDCALL;
+
+    wined3d_mutex_lock();
+    device->gpu_thread_priority = priority;
+    wined3d_mutex_unlock();
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_WaitForVBlank(IDirect3DDevice9Ex *iface, UINT swapchain_idx)
 {
-    FIXME("iface %p, swapchain_idx %u stub!\n", iface, swapchain_idx);
+    struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
+    struct wined3d_raster_status status;
+    ULONGLONG deadline;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, swapchain_idx %u.\n", iface, swapchain_idx);
+
+    /* Poll the raster status until the vertical blank begins; bounded so a
+     * backend that never reports vblank returns after roughly one frame. */
+    deadline = GetTickCount64() + 40;
+    for (;;)
+    {
+        status.in_vblank = FALSE;
+        wined3d_mutex_lock();
+        wined3d_device_get_raster_status(device->wined3d_device, swapchain_idx, &status);
+        wined3d_mutex_unlock();
+
+        if (status.in_vblank || GetTickCount64() >= deadline)
+            break;
+        SwitchToThread();
+    }
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_CheckResourceResidency(IDirect3DDevice9Ex *iface,
         IDirect3DResource9 **resources, UINT32 resource_count)
 {
-    FIXME("iface %p, resources %p, resource_count %u stub!\n",
-            iface, resources, resource_count);
+    UINT32 i;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resources %p, resource_count %u.\n", iface, resources, resource_count);
+
+    if (resource_count && !resources)
+        return D3DERR_INVALIDCALL;
+
+    for (i = 0; i < resource_count; ++i)
+    {
+        if (!resources[i])
+            return D3DERR_INVALIDCALL;
+    }
+
+    /* wined3d keeps managed resources resident; none are paged out to disk. */
+    return S_OK;
 }
 
 static HRESULT WINAPI d3d9_device_SetMaximumFrameLatency(IDirect3DDevice9Ex *iface, UINT max_latency)

@@ -108,6 +108,7 @@ struct d3d9_device
     struct d3d9_surface *render_targets[D3D_MAX_SIMULTANEOUS_RENDERTARGETS];
 
     LONG device_state;
+    INT gpu_thread_priority;
     DWORD sysmem_vb : 16; /* D3D9_MAX_STREAMS */
     DWORD sysmem_ib : 1;
     DWORD in_destruction : 1;
