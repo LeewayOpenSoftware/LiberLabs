@@ -4512,32 +4512,80 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_PresentEx(IDirect3DDevice9Ex
 
 static HRESULT WINAPI d3d9_device_GetGPUThreadPriority(IDirect3DDevice9Ex *iface, INT *priority)
 {
-    FIXME("iface %p, priority %p stub!\n", iface, priority);
+    struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, priority %p.\n", iface, priority);
+
+    if (!priority)
+        return D3DERR_INVALIDCALL;
+
+    wined3d_mutex_lock();
+    *priority = device->gpu_thread_priority;
+    wined3d_mutex_unlock();
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_SetGPUThreadPriority(IDirect3DDevice9Ex *iface, INT priority)
 {
-    FIXME("iface %p, priority %d stub!\n", iface, priority);
+    struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, priority %d.\n", iface, priority);
+
+    if (priority < -7 || priority > 7)
+        return D3DERR_INVALIDCALL;
+
+    wined3d_mutex_lock();
+    device->gpu_thread_priority = priority;
+    wined3d_mutex_unlock();
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_WaitForVBlank(IDirect3DDevice9Ex *iface, UINT swapchain_idx)
 {
-    FIXME("iface %p, swapchain_idx %u stub!\n", iface, swapchain_idx);
+    struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
+    struct wined3d_raster_status status;
+    ULONGLONG deadline;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, swapchain_idx %u.\n", iface, swapchain_idx);
+
+    /* Poll the raster status until the vertical blank begins; bounded so a
+     * backend that never reports vblank returns after roughly one frame. */
+    deadline = GetTickCount64() + 40;
+    for (;;)
+    {
+        status.in_vblank = FALSE;
+        wined3d_mutex_lock();
+        wined3d_device_get_raster_status(device->wined3d_device, swapchain_idx, &status);
+        wined3d_mutex_unlock();
+
+        if (status.in_vblank || GetTickCount64() >= deadline)
+            break;
+        SwitchToThread();
+    }
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_CheckResourceResidency(IDirect3DDevice9Ex *iface,
         IDirect3DResource9 **resources, UINT32 resource_count)
 {
-    FIXME("iface %p, resources %p, resource_count %u stub!\n",
-            iface, resources, resource_count);
+    UINT32 i;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resources %p, resource_count %u.\n", iface, resources, resource_count);
+
+    if (resource_count && !resources)
+        return D3DERR_INVALIDCALL;
+
+    for (i = 0; i < resource_count; ++i)
+    {
+        if (!resources[i])
+            return D3DERR_INVALIDCALL;
+    }
+
+    /* wined3d keeps managed resources resident; none are paged out to disk. */
+    return S_OK;
 }
 
 static HRESULT WINAPI d3d9_device_SetMaximumFrameLatency(IDirect3DDevice9Ex *iface, UINT max_latency)
