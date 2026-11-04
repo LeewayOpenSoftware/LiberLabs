@@ -215,6 +215,12 @@ static inline struct d2d_device_context *impl_from_ID2D1DeviceContext(ID2D1Devic
     return CONTAINING_RECORD(iface, struct d2d_device_context, ID2D1DeviceContext6_iface);
 }
 
+static void d2d_device_context_set_unsupported(struct d2d_device_context *context)
+{
+    if (SUCCEEDED(context->error.code))
+        d2d_device_context_set_error(context, D2DERR_UNSUPPORTED_OPERATION);
+}
+
 static HRESULT STDMETHODCALLTYPE d2d_device_context_inner_QueryInterface(IUnknown *iface, REFIID iid, void **out)
 {
     struct d2d_device_context *context = impl_from_IUnknown(iface);
@@ -1861,12 +1867,23 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_Flush(ID2D1DeviceContext6 *i
 {
     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
 
-    FIXME("iface %p, tag1 %p, tag2 %p stub!\n", iface, tag1, tag2);
+    TRACE("iface %p, tag1 %p, tag2 %p.\n", iface, tag1, tag2);
 
     if (context->ops && context->ops->device_context_present)
-        context->ops->device_context_present(context->outer_unknown);
+    {
+        HRESULT hr;
 
-    return S_OK;
+        if (FAILED(hr = context->ops->device_context_present(context->outer_unknown))
+                && SUCCEEDED(context->error.code))
+            d2d_device_context_set_error(context, hr);
+    }
+
+    if (tag1)
+        *tag1 = context->error.tag1;
+    if (tag2)
+        *tag2 = context->error.tag2;
+
+    return context->error.code;
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_SaveDrawingState(ID2D1DeviceContext6 *iface,
@@ -3023,12 +3040,14 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawInk(ID2D1DeviceContext6 *if
         ID2D1Brush *brush, ID2D1InkStyle *ink_style)
 {
     FIXME("iface %p, ink %p, brush %p, ink_style %p stub!\n", iface, ink, brush, ink_style);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_DrawGradientMesh(ID2D1DeviceContext6 *iface,
         ID2D1GradientMesh *gradient_mesh)
 {
     FIXME("iface %p, gradient_mesh %p stub!\n", iface, gradient_mesh);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext2_DrawGdiMetafile(
@@ -3037,6 +3056,7 @@ static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext2_DrawGdiMeta
 {
     FIXME("iface %p, gdi_metafile %p, dst_rect %s, src_rect %s stub!\n", iface, gdi_metafile,
             debug_d2d_rect_f(dst_rect), debug_d2d_rect_f(src_rect));
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateTransformedImageSource(ID2D1DeviceContext6 *iface,
@@ -3063,6 +3083,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSpriteBatch(ID2D1DeviceCont
     FIXME("iface %p, sprite_batch %p, start_index %u, sprite_count %u, bitmap %p, interpolation_mode %u,"
             "sprite_options %u stub!\n", iface, sprite_batch, start_index, sprite_count, bitmap,
             interpolation_mode, sprite_options);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateSvgGlyphStyle(ID2D1DeviceContext6 *iface,
@@ -3082,6 +3103,7 @@ static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext4_DrawText(ID
             "svg_glyph_style %p, color_palette_index %u, options %#x, measuring_mode %u stub!\n",
             iface, debugstr_wn(string, string_length), string_length, text_format, debug_d2d_rect_f(layout_rect),
             default_fill_brush, svg_glyph_style, color_palette_index, options, measuring_mode);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext4_DrawTextLayout(ID2D1DeviceContext6 *iface,
@@ -3091,6 +3113,7 @@ static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext4_DrawTextLay
     FIXME("iface %p, origin %s, text_layout %p, default_fill_brush %p, svg_glyph_style %p, color_palette_index %u,"
             "options %#x stub!\n", iface, debug_d2d_point_2f(&origin), text_layout, default_fill_brush,
             svg_glyph_style, color_palette_index, options);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_DrawColorBitmapGlyphRun(ID2D1DeviceContext6 *iface,
@@ -3099,6 +3122,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawColorBitmapGlyphRun(ID2D1De
 {
     FIXME("iface %p, glyph_image_format %#x, baseline_origin %s, glyph_run %p, measuring_mode %u, bitmap_snap_option %#x stub!\n",
             iface, glyph_image_format, debug_d2d_point_2f(&baseline_origin), glyph_run, measuring_mode, bitmap_snap_option);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_DrawSvgGlyphRun(ID2D1DeviceContext6 *iface,
@@ -3108,6 +3132,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSvgGlyphRun(ID2D1DeviceCont
     FIXME("iface %p, baseline_origin %s, glyph_run %p, default_fill_brush %p, svg_glyph_style %p,"
             "color_palette_index %u, measuring_mode %u stub!\n", iface, debug_d2d_point_2f(&baseline_origin),
             glyph_run, default_fill_brush, svg_glyph_style, color_palette_index, measuring_mode);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_GetColorBitmapGlyphImage(ID2D1DeviceContext6 *iface,
@@ -3151,6 +3176,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSvgDocument(ID2D1DeviceCont
         ID2D1SvgDocument *svg_document)
 {
     FIXME("iface %p, svg_document %p stub!\n", iface, svg_document);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromDxgiColorSpace(
@@ -3176,6 +3202,7 @@ static void STDMETHODCALLTYPE d2d_device_context_BlendImage(ID2D1DeviceContext6 
     FIXME("iface %p, image %p, blend_mode %u, target_offset %s, image_rect %s, interpolation_mode %u stub!\n",
             iface, image, blend_mode, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
             interpolation_mode);
+    d2d_device_context_set_unsupported(impl_from_ID2D1DeviceContext(iface));
 }
 
 static const struct ID2D1DeviceContext6Vtbl d2d_device_context_vtbl =
