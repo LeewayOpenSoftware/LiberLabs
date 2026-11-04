@@ -4397,6 +4397,135 @@ static HRESULT d2d_geometry_compute_area(ID2D1Geometry *geometry, const D2D1_MAT
     return hr;
 }
 
+static HRESULT d2d_geometry_compute_length(ID2D1Geometry *geometry, const D2D1_MATRIX_3X2_F *transform,
+        float tolerance, float *ret)
+{
+    ID2D1PathGeometry *path_geometry;
+    float length = 0.0f;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = d2d_geometry_get_simplified(geometry, transform, tolerance, &path_geometry)))
+    {
+        struct d2d_geometry *path_impl = unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)path_geometry);
+        size_t i, j;
+
+        for (i = 0; i < path_impl->u.path.figure_count; ++i)
+        {
+            const struct d2d_figure *figure = &path_impl->u.path.figures[i];
+            D2D1_POINT_2F v;
+
+            for (j = 1; j < figure->vertex_count; ++j)
+            {
+                d2d_point_subtract(&v, &figure->vertices[j], &figure->vertices[j - 1]);
+                length += d2d_point_length(&v);
+            }
+            if ((figure->flags & D2D_FIGURE_FLAG_CLOSED) && figure->vertex_count > 1)
+            {
+                d2d_point_subtract(&v, &figure->vertices[0], &figure->vertices[figure->vertex_count - 1]);
+                length += d2d_point_length(&v);
+            }
+        }
+
+        *ret = length;
+        ID2D1PathGeometry_Release(path_geometry);
+    }
+
+    return hr;
+}
+
+/* Emit the stroke region as rectangles per flattened segment plus bevel-join
+ * triangles, under winding fill so the pieces union to the stroked outline. */
+static void d2d_widen_emit_triangle(ID2D1SimplifiedGeometrySink *sink,
+        D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F c)
+{
+    D2D1_POINT_2F rest[2];
+
+    rest[0] = b;
+    rest[1] = c;
+    ID2D1SimplifiedGeometrySink_BeginFigure(sink, a, D2D1_FIGURE_BEGIN_FILLED);
+    ID2D1SimplifiedGeometrySink_AddLines(sink, rest, 2);
+    ID2D1SimplifiedGeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+}
+
+static HRESULT d2d_geometry_widen(ID2D1Geometry *geometry, float stroke_width,
+        const D2D1_MATRIX_3X2_F *transform, float tolerance, ID2D1SimplifiedGeometrySink *sink)
+{
+    ID2D1PathGeometry *path_geometry;
+    float half = stroke_width * 0.5f;
+    HRESULT hr;
+
+    if (half <= 0.0f)
+        return E_INVALIDARG;
+
+    if (SUCCEEDED(hr = d2d_geometry_get_simplified(geometry, transform, tolerance, &path_geometry)))
+    {
+        struct d2d_geometry *path_impl = unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)path_geometry);
+        size_t i, j;
+
+        ID2D1SimplifiedGeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
+
+        for (i = 0; i < path_impl->u.path.figure_count; ++i)
+        {
+            const struct d2d_figure *figure = &path_impl->u.path.figures[i];
+            BOOL closed = !!(figure->flags & D2D_FIGURE_FLAG_CLOSED);
+            size_t seg_end;
+
+            if (figure->vertex_count < 2)
+                continue;
+
+            seg_end = closed ? figure->vertex_count : figure->vertex_count - 1;
+            for (j = 0; j < seg_end; ++j)
+            {
+                const D2D1_POINT_2F *a = &figure->vertices[j];
+                const D2D1_POINT_2F *b = &figure->vertices[(j + 1) % figure->vertex_count];
+                D2D1_POINT_2F dir, n, quad[4], rest[3];
+                float len;
+
+                d2d_point_subtract(&dir, b, a);
+                if ((len = d2d_point_length(&dir)) == 0.0f)
+                    continue;
+                n.x = -dir.y / len * half;
+                n.y =  dir.x / len * half;
+
+                quad[0].x = a->x + n.x; quad[0].y = a->y + n.y;
+                quad[1].x = b->x + n.x; quad[1].y = b->y + n.y;
+                quad[2].x = b->x - n.x; quad[2].y = b->y - n.y;
+                quad[3].x = a->x - n.x; quad[3].y = a->y - n.y;
+                rest[0] = quad[1]; rest[1] = quad[2]; rest[2] = quad[3];
+                ID2D1SimplifiedGeometrySink_BeginFigure(sink, quad[0], D2D1_FIGURE_BEGIN_FILLED);
+                ID2D1SimplifiedGeometrySink_AddLines(sink, rest, 3);
+                ID2D1SimplifiedGeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+            }
+
+            for (j = closed ? 0 : 1; j < (closed ? figure->vertex_count : figure->vertex_count - 1); ++j)
+            {
+                const D2D1_POINT_2F *prev = &figure->vertices[(j + figure->vertex_count - 1) % figure->vertex_count];
+                const D2D1_POINT_2F *cur = &figure->vertices[j];
+                const D2D1_POINT_2F *next = &figure->vertices[(j + 1) % figure->vertex_count];
+                D2D1_POINT_2F d0, d1, n0, n1, p0p, p0m, p1p, p1m;
+                float l0, l1;
+
+                d2d_point_subtract(&d0, cur, prev);
+                d2d_point_subtract(&d1, next, cur);
+                if ((l0 = d2d_point_length(&d0)) == 0.0f || (l1 = d2d_point_length(&d1)) == 0.0f)
+                    continue;
+                n0.x = -d0.y / l0 * half; n0.y = d0.x / l0 * half;
+                n1.x = -d1.y / l1 * half; n1.y = d1.x / l1 * half;
+                p0p.x = cur->x + n0.x; p0p.y = cur->y + n0.y;
+                p1p.x = cur->x + n1.x; p1p.y = cur->y + n1.y;
+                p0m.x = cur->x - n0.x; p0m.y = cur->y - n0.y;
+                p1m.x = cur->x - n1.x; p1m.y = cur->y - n1.y;
+                d2d_widen_emit_triangle(sink, *cur, p0p, p1p);
+                d2d_widen_emit_triangle(sink, *cur, p0m, p1m);
+            }
+        }
+
+        ID2D1PathGeometry_Release(path_geometry);
+    }
+
+    return hr;
+}
+
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Tessellate(ID2D1PathGeometry1 *iface,
         const D2D1_MATRIX_3X2_F *transform, float tolerance, ID2D1TessellationSink *sink)
 {
@@ -4438,9 +4567,14 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_ComputeArea(ID2D1PathGeometry
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_ComputeLength(ID2D1PathGeometry1 *iface,
         const D2D1_MATRIX_3X2_F *transform, float tolerance, float *length)
 {
-    FIXME("iface %p, transform %p, tolerance %.8e, length %p stub!\n", iface, transform, tolerance, length);
+    struct d2d_geometry *geometry = impl_from_ID2D1PathGeometry1(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, transform %p, tolerance %.8e, length %p.\n", iface, transform, tolerance, length);
+
+    if (!length)
+        return E_INVALIDARG;
+
+    return d2d_geometry_compute_length(&geometry->ID2D1Geometry_iface, transform, tolerance, length);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_ComputePointAtLength(ID2D1PathGeometry1 *iface, float length,
@@ -4456,10 +4590,15 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Widen(ID2D1PathGeometry1 *ifa
         ID2D1StrokeStyle *stroke_style, const D2D1_MATRIX_3X2_F *transform, float tolerance,
         ID2D1SimplifiedGeometrySink *sink)
 {
-    FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p stub!\n",
+    struct d2d_geometry *geometry = impl_from_ID2D1PathGeometry1(iface);
+
+    TRACE("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p.\n",
             iface, stroke_width, stroke_style, transform, tolerance, sink);
 
-    return E_NOTIMPL;
+    if (!sink)
+        return E_INVALIDARG;
+
+    return d2d_geometry_widen(&geometry->ID2D1Geometry_iface, stroke_width, transform, tolerance, sink);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Open(ID2D1PathGeometry1 *iface, ID2D1GeometrySink **sink)
