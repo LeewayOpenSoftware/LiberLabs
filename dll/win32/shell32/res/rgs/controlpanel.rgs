@@ -90,7 +90,7 @@ HKCR
 			{
 				Open
 				{
-					Command = e '%%SystemRoot%%\ImmersiveControlPanel\SystemSettings.exe "ms-settings:network"'
+					Command = e '%%SystemRoot%%\system32\ncsc.exe'
 				}
 			}
 			ShellFolder
