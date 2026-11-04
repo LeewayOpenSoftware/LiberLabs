@@ -97,7 +97,7 @@
 @ stdcall CommConfigDialogA(str long ptr)
 @ stdcall CommConfigDialogW(wstr long ptr)
 @ stdcall -stub -version=0x600+ CompareCalendarDates(ptr ptr ptr)
-@ stdcall CompareFileTime(ptr ptr)
+@ stdcall CompareFileTime(ptr ptr) kernelbase.CompareFileTime
 @ stdcall -version=0xA00+ CompareObjectHandles(ptr ptr)
 @ stdcall CompareStringA(long long str long str long) kernelbase.CompareStringA
 @ stdcall -version=0x600+ CompareStringEx(wstr long wstr long wstr long ptr ptr ptr) kernelbase.CompareStringEx
@@ -314,7 +314,7 @@
 @ stdcall FatalExit(long)
 @ stdcall FileTimeToDosDateTime(ptr ptr ptr)
 @ stdcall FileTimeToLocalFileTime(ptr ptr)
-@ stdcall FileTimeToSystemTime(ptr ptr)
+@ stdcall FileTimeToSystemTime(ptr ptr) kernelbase.FileTimeToSystemTime
 @ stdcall FillConsoleOutputAttribute(long long long long ptr) kernelbase.FillConsoleOutputAttribute
 @ stdcall FillConsoleOutputCharacterA(long long long long ptr) kernelbase.FillConsoleOutputCharacterA
 @ stdcall FillConsoleOutputCharacterW(long long long long ptr) kernelbase.FillConsoleOutputCharacterW
@@ -679,10 +679,10 @@
 @ stdcall GetSystemPowerStatus(ptr)
 @ stdcall -version=0x600+ GetSystemPreferredUILanguages(long ptr wstr ptr) kernelbase.GetSystemPreferredUILanguages
 @ stdcall GetSystemRegistryQuota(ptr ptr)
-@ stdcall GetSystemTime(ptr)
+@ stdcall GetSystemTime(ptr) kernelbase.GetSystemTime
 @ stdcall GetSystemTimeAdjustment(ptr ptr ptr)
-@ stdcall GetSystemTimeAsFileTime(ptr)
-@ stdcall -version=0x602+ GetSystemTimePreciseAsFileTime(ptr)
+@ stdcall GetSystemTimeAsFileTime(ptr) kernelbase.GetSystemTimeAsFileTime
+@ stdcall -version=0x602+ GetSystemTimePreciseAsFileTime(ptr) kernelbase.GetSystemTimePreciseAsFileTime
 @ stdcall GetSystemTimes(ptr ptr ptr)
 @ stdcall GetSystemWindowsDirectoryA(ptr long)
 @ stdcall GetSystemWindowsDirectoryW(ptr long)
@@ -1309,7 +1309,7 @@
 @ stdcall SuspendThread(long) kernelbase.SuspendThread
 @ stdcall SwitchToFiber(ptr)
 @ stdcall SwitchToThread() kernelbase.SwitchToThread
-@ stdcall SystemTimeToFileTime(ptr ptr)
+@ stdcall SystemTimeToFileTime(ptr ptr) kernelbase.SystemTimeToFileTime
 @ stdcall SystemTimeToTzSpecificLocalTime(ptr ptr ptr)
 @ stdcall -version=0x601+ SystemTimeToTzSpecificLocalTimeEx(ptr ptr ptr) kernelbase.SystemTimeToTzSpecificLocalTimeEx
 @ stdcall TerminateJobObject(ptr long)

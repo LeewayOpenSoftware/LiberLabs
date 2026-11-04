@@ -28,6 +28,7 @@ add_library(kernelbase MODULE
     Security.c
     SyncObjects.c
     VerifyScripts.c
+    TimeConversion.c
     TimeZoneEx.c
     VirtualAlloc2.c
     VolumeInformation.c

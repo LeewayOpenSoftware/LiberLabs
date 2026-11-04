@@ -106,7 +106,7 @@
 @ stdcall CloseThreadpoolTimer(ptr) ntdll.TpReleaseTimer
 @ stdcall CloseThreadpoolWait(ptr) ntdll.TpReleaseWait
 @ stdcall CloseThreadpoolWork(ptr) ntdll.TpReleaseWork
-@ stdcall CompareFileTime(ptr ptr) kernel32.CompareFileTime
+@ stdcall CompareFileTime(ptr ptr)
 @ stdcall -version=0xA00+ CompareObjectHandles(ptr ptr) kernel32.CompareObjectHandles
 @ stdcall CompareStringA(long long str long str long)
 @ stdcall CompareStringEx(wstr long wstr long wstr long ptr ptr long)
@@ -273,7 +273,7 @@
 @ stdcall FatalAppExitA(long str) kernel32.FatalAppExitA
 @ stdcall FatalAppExitW(long wstr) kernel32.FatalAppExitW
 @ stdcall FileTimeToLocalFileTime(ptr ptr) kernel32.FileTimeToLocalFileTime
-@ stdcall FileTimeToSystemTime(ptr ptr) kernel32.FileTimeToSystemTime
+@ stdcall FileTimeToSystemTime(ptr ptr)
 @ stdcall FillConsoleOutputAttribute(long long long long ptr)
 @ stdcall FillConsoleOutputCharacterA(long long long long ptr)
 @ stdcall FillConsoleOutputCharacterW(long long long long ptr)
@@ -569,10 +569,10 @@
 @ stdcall GetSystemInfo(ptr) kernel32.GetSystemInfo
 @ stdcall GetSystemPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetProcessorSystemCycleTime(long ptr ptr) kernel32.GetProcessorSystemCycleTime
-@ stdcall GetSystemTime(ptr) kernel32.GetSystemTime
+@ stdcall GetSystemTime(ptr)
 @ stdcall GetSystemTimeAdjustment(ptr ptr ptr) kernel32.GetSystemTimeAdjustment
-@ stdcall GetSystemTimeAsFileTime(ptr) kernel32.GetSystemTimeAsFileTime
-@ stdcall -version=0x602+ GetSystemTimePreciseAsFileTime(ptr) kernel32.GetSystemTimePreciseAsFileTime
+@ stdcall GetSystemTimeAsFileTime(ptr)
+@ stdcall -version=0x602+ GetSystemTimePreciseAsFileTime(ptr)
 @ stdcall GetSystemTimes(ptr ptr ptr) kernel32.GetSystemTimes
 @ stdcall GetSystemWindowsDirectoryA(ptr long) kernel32.GetSystemWindowsDirectoryA
 @ stdcall GetSystemWindowsDirectoryW(ptr long) kernel32.GetSystemWindowsDirectoryW
@@ -1301,7 +1301,7 @@
 @ stdcall SuspendThread(long)
 @ stdcall SwitchToFiber(ptr) kernel32.SwitchToFiber
 @ stdcall SwitchToThread()
-@ stdcall SystemTimeToFileTime(ptr ptr) kernel32.SystemTimeToFileTime
+@ stdcall SystemTimeToFileTime(ptr ptr)
 @ stdcall SystemTimeToTzSpecificLocalTime(ptr ptr ptr) kernel32.SystemTimeToTzSpecificLocalTime
 @ stdcall SystemTimeToTzSpecificLocalTimeEx(ptr ptr ptr)
 @ stdcall TerminateProcess(ptr long) kernel32.TerminateProcess
