@@ -24,4 +24,5 @@ if((ARCH STREQUAL "arm64") AND RPI3_SUPPORT)
 endif()
 #add_subdirectory(msdvbnp) #disabled in trunk
 #add_subdirectory(msvidctl) #disabled in trunk
+add_subdirectory(dxc)
 add_subdirectory(wine)
