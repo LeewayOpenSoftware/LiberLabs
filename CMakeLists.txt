@@ -446,6 +446,7 @@ Enable this if the module uses typeid or dynamic_cast. You will probably need to
     #DX-PRUNED     add_subdirectory(subsystems)
     add_subdirectory(sdk/tools/wpp)
     add_subdirectory(win32ss)
+    add_subdirectory(tests/liberx-shaders)
 
     if(ARCH STREQUAL "arm64" AND ENABLE_FEX_ARM64EC AND FEX_ARM64EC_AVAILABLE AND NOT ARM64EC_RUNTIME)
         include(sdk/cmake/arm64ec.cmake)
