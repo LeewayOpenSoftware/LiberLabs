@@ -2097,4 +2097,13 @@ HRESULT WINAPI XAudio2Create(IXAudio2 **ppxa2, UINT32 flags, XAUDIO2_PROCESSOR p
 
     return S_OK;
 }
+
+#if XAUDIO2_VER == 8
+HRESULT WINAPI XAudio2CreateWithVersionInfo(IXAudio2 **ppxa2, UINT32 flags, XAUDIO2_PROCESSOR proc, DWORD version)
+{
+    TRACE("%p %#x %#x %#lx.\n", ppxa2, flags, proc, version);
+
+    return XAudio2Create(ppxa2, flags, proc);
+}
+#endif
 #endif /* XAUDIO2_VER >= 8 */
