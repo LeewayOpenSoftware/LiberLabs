@@ -757,15 +757,26 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
     RtlZeroMemory(&stats, sizeof(stats));
     error = GetIpStatistics(&stats);
     if (error == NO_ERROR)
-        SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_PASS, L"The stack answers statistics queries (%lu datagrams received).", stats.dwInReceives);
+    {
+        MIB_TCPSTATS tcp;
+        DWORD tcpError;
+
+        RtlZeroMemory(&tcp, sizeof(tcp));
+        tcpError = GetTcpStatistics(&tcp);
+        if (tcpError == NO_ERROR)
+            SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_PASS, L"IP: %lu datagrams received; TCP: %lu active and %lu passive opens, %lu connections.",
+                    stats.dwInReceives, tcp.dwActiveOpens, tcp.dwPassiveOpens, tcp.dwCurrEstab);
+        else
+            SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_WARN, L"IP statistics answer (%lu datagrams received); TCP statistics do not (error %lu).", stats.dwInReceives, tcpError);
+    }
     else if (IsNotImplemented(error))
         SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_UNSUPPORTED, L"GetIpStatistics is not implemented (error %lu).", error);
     else
         SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_FAIL, L"The stack does not answer statistics queries (error %lu).", error);
     DONE();
 
-    /* 3 loopback: ICMP echo to this computer. The TCP self-test is opt-in (LoopbackTcpTest = 1): the
-     * TCP listen path is known to be defective, so it is not part of the default result. */
+    /* 3 loopback: ICMP echo and a TCP connection to this computer. The TCP self-test can be turned off
+     * with LoopbackTcpTest = 0; its real result is reported, a stack defect shows as FAILED. */
     {
         DWORD icmpStatus = PingV4(L"127.0.0.1", &rtt);
         WCHAR icmpText[80], tcpText[96];
@@ -778,8 +789,8 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
             StringCchPrintfW(icmpText, ARRAYSIZE(icmpText), L"ICMP echo to 127.0.0.1: no reply (code %lu)", icmpStatus);
 
         sockError = 0;
-        StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP loopback not tested (known defect in the listen path)");
-        if (ReadConfigPortValue(L"LoopbackTcpTest", 0) == 1)
+        StringCchCopyW(tcpText, ARRAYSIZE(tcpText), L"TCP loopback not tested (turned off by configuration)");
+        if (ReadConfigPortValue(L"LoopbackTcpTest", 1) != 0)
         {
             winsock = WinsockUp();
             if (!winsock)
