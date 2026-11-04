@@ -1,7 +1,7 @@
 /*
  * PROJECT:     LiberX DirectX Shader Compiler (DXC) compatibility layer
  * LICENSE:     LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
- *              The compile/validate/reflect paths are backed by vkd3d-shader
+ *              The compile/validate/disassemble paths are backed by vkd3d-shader
  *              (LGPL-2.1-or-later). The DXC COM ABI (dxcapi.h) is vendored from
  *              Microsoft DirectXShaderCompiler under the University of Illinois/
  *              NCSA license; see sdk/include/psdk/dxcapi.h and
@@ -9,25 +9,30 @@
  * PURPOSE:     Item 18 DXC Level 1 - an explicitly limited DXC compatibility
  *              milestone. Exposes IDxcCompiler3 / IDxcUtils / IDxcValidator.
  *              Capabilities are exposed ONLY where genuinely implemented and
- *              tested; everything else returns a defined HRESULT plus an error
- *              blob and NEVER misleading output. This build does NOT advertise
- *              or provide full Shader Model 6 compilation. SM6 compile requests
- *              fail explicitly and consistently (see Compile()).
+ *              tested, kept distinct, and this build NEVER advertises or
+ *              produces full Shader Model 6 DXIL. An SM6 compile request fails
+ *              explicitly and consistently (defined HRESULT + error blob).
  * COPYRIGHT:   Copyright 2026 Leeway Open Software
  *                <281492504+LeewayOpenSoftware@users.noreply.github.com>
  *
- * B0 (this file): the DXC COM surface and object plumbing - DxcCreateInstance,
- * reference counting, QueryInterface, blob/result objects, and honest E_NOTIMPL
- * failures with error blobs for every capability. B1 wires the real
- * vkd3d-shader parse/validate/reflect/disassemble + HLSL->SM<=5 compile paths.
+ * Capability matrix (what is genuinely implemented here):
+ *   IDxcCompiler3::Compile  - HLSL -> Shader Model <= 5 (DXBC/TPF) via vkd3d.
+ *                             SM6 (profile *_6_*) -> defined refusal, no output.
+ *   IDxcCompiler3::Disassemble - DXBC/DXIL container -> D3D ASM text via vkd3d.
+ *   IDxcValidator::Validate - structural (UNSIGNED) DXIL validation via vkd3d
+ *                             parse. No Microsoft dxil.dll signing is performed.
+ *   IDxcUtils               - blob creation (real); reflection / container-part
+ *                             extraction NOT yet implemented (honest E_NOTIMPL).
  */
 
 #include <windows.h>
 #include <unknwn.h>
 #define DXC_API_IMPORT   /* we implement+export these (see .spec); not an import */
 #include <dxcapi.h>
+#include <vkd3d_shader.h>
 #include <cstring>
 #include <cwchar>
+#include <cstdio>
 #include <new>
 
 /* ------------------------------------------------------------------ *
@@ -53,9 +58,10 @@ static const IID LX_IID_IDxcValidator =
 
 static inline bool IidEq(REFIID a, REFIID b) { return IsEqualIID(a, b) != FALSE; }
 
-/* HRESULT used for "this build does not implement that capability yet".
- * E_NOTIMPL is the defined, consistent failure code for the Level 1 skeleton. */
-#define LX_DXC_E_NOTIMPL E_NOTIMPL
+/* Defined, consistent failure codes (owner req: SM6 must fail with a defined
+ * HRESULT plus an error blob). Custom facility 0xAA = "LiberX DXC". */
+#define LX_DXC_E_NOTIMPL         E_NOTIMPL
+#define LX_DXC_E_SM6_UNSUPPORTED ((HRESULT)0x80AA0006L)
 
 /* ------------------------------------------------------------------ *
  * Blob object - implements IDxcBlobUtf8 (covers IDxcBlob and          *
@@ -146,8 +152,6 @@ static DxcBlobImpl *NewTextBlob(const char *utf8)
 
 /* ------------------------------------------------------------------ *
  * Result object - implements IDxcResult (covers IDxcOperationResult). *
- * Carries a status HRESULT, an optional object blob, and an optional  *
- * UTF-8 error blob. Enough for honest Compile/Disassemble/Validate.   *
  * ------------------------------------------------------------------ */
 class DxcResultImpl : public IDxcResult
 {
@@ -252,21 +256,90 @@ public:
     }
 };
 
-/* Build an IDxcResult carrying a failed status + an error message, then QI it
- * to the caller-requested interface. Used for every unimplemented capability so
- * the failure is explicit, consistent, and never silent. */
-static HRESULT MakeFailResult(HRESULT status, const char *msg,
-                              DXC_OUT_KIND objKind, REFIID riid, void **ppResult)
+/* ------------------------------------------------------------------ *
+ * Result builders.                                                    *
+ * ------------------------------------------------------------------ */
+static HRESULT MakeObjectResult(HRESULT status, DxcBlobImpl *object,
+                                DXC_OUT_KIND kind, const char *errMsg,
+                                REFIID riid, void **ppResult)
 {
     if (!ppResult) return E_POINTER;
     *ppResult = nullptr;
-    DxcBlobImpl *err = NewTextBlob(msg);
-    DxcResultImpl *res = new (std::nothrow) DxcResultImpl(status, nullptr, objKind, err);
+    DxcBlobImpl *err = (errMsg && errMsg[0]) ? NewTextBlob(errMsg) : nullptr;
+    DxcResultImpl *res = new (std::nothrow) DxcResultImpl(status, object, kind, err);
     if (err) err->Release();
     if (!res) return E_OUTOFMEMORY;
     HRESULT hr = res->QueryInterface(riid, ppResult);
     res->Release();
     return hr;
+}
+
+/* Failed status + error message, no object. */
+static HRESULT MakeFailResult(HRESULT status, const char *msg,
+                              DXC_OUT_KIND objKind, REFIID riid, void **ppResult)
+{
+    return MakeObjectResult(status, nullptr, objKind, msg, riid, ppResult);
+}
+
+/* ------------------------------------------------------------------ *
+ * Small helpers for the vkd3d-backed paths.                           *
+ * ------------------------------------------------------------------ */
+static char *Utf8FromWide(LPCWSTR w)   /* caller delete[]; null -> null */
+{
+    if (!w) return nullptr;
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return nullptr;
+    char *s = new (std::nothrow) char[n];
+    if (!s) return nullptr;
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, nullptr, nullptr);
+    return s;
+}
+
+/* Return the value following a flag (e.g. L"-T") in the argv array, or null. */
+static LPCWSTR FindArgValue(LPCWSTR *argv, UINT32 argc, LPCWSTR flag)
+{
+    if (!argv) return nullptr;
+    for (UINT32 i = 0; i + 1 < argc; i++)
+        if (argv[i] && wcscmp(argv[i], flag) == 0)
+            return argv[i + 1];
+    return nullptr;
+}
+
+/* Parse the Shader Model MAJOR version from a profile like "vs_6_0" -> 6. */
+static int ProfileSMMajor(const char *profile)
+{
+    if (!profile) return -1;
+    const char *u = strchr(profile, '_');
+    if (!u) return -1;
+    u++;
+    if (*u < '0' || *u > '9') return -1;
+    int maj = 0;
+    while (*u >= '0' && *u <= '9') { maj = maj * 10 + (*u - '0'); u++; }
+    return maj;
+}
+
+/* Decode a DxcBuffer source into a UTF-8 byte buffer (caller delete[]). */
+static char *SourceToUtf8(const DxcBuffer *b, size_t *outLen)
+{
+    *outLen = 0;
+    if (!b || !b->Ptr) return nullptr;
+    if (b->Encoding == DXC_CP_UTF16)
+    {
+        int wn = (int)(b->Size / sizeof(wchar_t));
+        int n = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)b->Ptr, wn,
+                                    nullptr, 0, nullptr, nullptr);
+        if (n <= 0) return nullptr;
+        char *s = new (std::nothrow) char[n ? n : 1];
+        if (!s) return nullptr;
+        WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)b->Ptr, wn, s, n, nullptr, nullptr);
+        *outLen = (size_t)n;
+        return s;
+    }
+    char *s = new (std::nothrow) char[b->Size ? b->Size : 1];
+    if (!s) return nullptr;
+    if (b->Size) memcpy(s, b->Ptr, b->Size);
+    *outLen = b->Size;
+    return s;
 }
 
 /* ------------------------------------------------------------------ *
@@ -294,23 +367,161 @@ public:
                                       IDxcIncludeHandler *pIncludeHandler,
                                       REFIID riid, LPVOID *ppResult) override
     {
-        (void)pSource; (void)pArguments; (void)argCount; (void)pIncludeHandler;
-        /* B0 skeleton: no code generation wired yet. Fail explicitly with an
-         * error blob. B1 routes SM<=5 to vkd3d and returns a *defined* SM6
-         * refusal here. Never emits misleading success. */
-        return MakeFailResult(LX_DXC_E_NOTIMPL,
-            "LiberX DXC Level 1 (B0): HLSL compilation is not wired in this "
-            "build yet. This build never produces Shader Model 6 DXIL.",
-            DXC_OUT_OBJECT, riid, (void **)ppResult);
+        (void)pIncludeHandler;   /* -I/include handling: B2 */
+        if (!ppResult) return E_POINTER;
+        *ppResult = nullptr;
+        if (!pSource || !pSource->Ptr)
+            return MakeFailResult(E_INVALIDARG, "LiberX DXC: no source provided.",
+                                  DXC_OUT_OBJECT, riid, (void **)ppResult);
+
+        LPCWSTR wprofile = FindArgValue(pArguments, argCount, L"-T");
+        if (!wprofile) wprofile = FindArgValue(pArguments, argCount, L"/T");
+        char *profile = Utf8FromWide(wprofile);
+        if (!profile)
+            return MakeFailResult(E_INVALIDARG,
+                "LiberX DXC: no target profile (-T) specified.",
+                DXC_OUT_OBJECT, riid, (void **)ppResult);
+
+        int maj = ProfileSMMajor(profile);
+        if (maj >= 6)
+        {
+            char msg[320];
+            snprintf(msg, sizeof msg,
+                "LiberX DXC Level 1: Shader Model 6 compilation (profile '%s') "
+                "is not supported by this build. It compiles Shader Model 5 and "
+                "below (HLSL->DXBC) via vkd3d, and never produces DXIL.", profile);
+            delete[] profile;
+            return MakeFailResult(LX_DXC_E_SM6_UNSUPPORTED, msg,
+                                  DXC_OUT_OBJECT, riid, (void **)ppResult);
+        }
+
+        LPCWSTR wentry = FindArgValue(pArguments, argCount, L"-E");
+        char *entry = Utf8FromWide(wentry);   /* null -> vkd3d uses "main" */
+
+        size_t srcLen = 0;
+        char *src = SourceToUtf8(pSource, &srcLen);
+        if (!src)
+        {
+            delete[] profile; delete[] entry;
+            return MakeFailResult(E_OUTOFMEMORY, "LiberX DXC: source decode failed.",
+                                  DXC_OUT_OBJECT, riid, (void **)ppResult);
+        }
+
+        struct vkd3d_shader_hlsl_source_info hlsl;
+        memset(&hlsl, 0, sizeof hlsl);
+        hlsl.type        = VKD3D_SHADER_STRUCTURE_TYPE_HLSL_SOURCE_INFO;
+        hlsl.entry_point = entry;
+        hlsl.profile     = profile;
+
+        struct vkd3d_shader_compile_info ci;
+        memset(&ci, 0, sizeof ci);
+        ci.type        = VKD3D_SHADER_STRUCTURE_TYPE_COMPILE_INFO;
+        ci.next        = &hlsl;
+        ci.source.code = src;
+        ci.source.size = srcLen;
+        ci.source_type = VKD3D_SHADER_SOURCE_HLSL;
+        ci.target_type = VKD3D_SHADER_TARGET_DXBC_TPF;   /* SM<=5 object */
+        ci.log_level   = VKD3D_SHADER_LOG_WARNING;
+
+        struct vkd3d_shader_code out;
+        memset(&out, 0, sizeof out);
+        char *messages = nullptr;
+        int rc = vkd3d_shader_compile(&ci, &out, &messages);
+
+        HRESULT hr;
+        if (rc == VKD3D_OK)
+        {
+            DxcBlobImpl *obj = new (std::nothrow)
+                DxcBlobImpl(out.code, out.size, DXC_CP_ACP, false);
+            if (obj && obj->valid())
+            {
+                hr = MakeObjectResult(S_OK, obj, DXC_OUT_OBJECT, messages,
+                                      riid, (void **)ppResult);
+                obj->Release();
+            }
+            else
+            {
+                if (obj) obj->Release();
+                hr = MakeFailResult(E_OUTOFMEMORY,
+                    "LiberX DXC: out of memory building result.",
+                    DXC_OUT_OBJECT, riid, (void **)ppResult);
+            }
+        }
+        else
+        {
+            hr = MakeFailResult(E_FAIL,
+                (messages && messages[0]) ? messages
+                                          : "LiberX DXC: HLSL compilation failed.",
+                DXC_OUT_OBJECT, riid, (void **)ppResult);
+        }
+
+        if (messages) vkd3d_shader_free_messages(messages);
+        if (rc == VKD3D_OK) vkd3d_shader_free_shader_code(&out);
+        delete[] src; delete[] entry; delete[] profile;
+        return hr;
     }
 
     HRESULT STDMETHODCALLTYPE Disassemble(const DxcBuffer *pObject,
                                           REFIID riid, LPVOID *ppResult) override
     {
-        (void)pObject;
-        return MakeFailResult(LX_DXC_E_NOTIMPL,
-            "LiberX DXC Level 1 (B0): disassembly is not wired in this build "
-            "yet.", DXC_OUT_DISASSEMBLY, riid, (void **)ppResult);
+        if (!ppResult) return E_POINTER;
+        *ppResult = nullptr;
+        if (!pObject || !pObject->Ptr || !pObject->Size)
+            return MakeFailResult(E_INVALIDARG, "LiberX DXC: no object to disassemble.",
+                                  DXC_OUT_DISASSEMBLY, riid, (void **)ppResult);
+
+        /* Try a DXIL container first, then a TPF (SM<=5) container. */
+        const enum vkd3d_shader_source_type tryTypes[2] =
+            { VKD3D_SHADER_SOURCE_DXBC_DXIL, VKD3D_SHADER_SOURCE_DXBC_TPF };
+        HRESULT hr = E_FAIL;
+        bool done = false;
+        for (int t = 0; t < 2 && !done; t++)
+        {
+            struct vkd3d_shader_compile_info ci;
+            memset(&ci, 0, sizeof ci);
+            ci.type        = VKD3D_SHADER_STRUCTURE_TYPE_COMPILE_INFO;
+            ci.source.code = pObject->Ptr;
+            ci.source.size = pObject->Size;
+            ci.source_type = tryTypes[t];
+            ci.target_type = VKD3D_SHADER_TARGET_D3D_ASM;
+            ci.log_level   = VKD3D_SHADER_LOG_WARNING;
+
+            struct vkd3d_shader_code out;
+            memset(&out, 0, sizeof out);
+            char *messages = nullptr;
+            int rc = vkd3d_shader_compile(&ci, &out, &messages);
+
+            if (rc == VKD3D_OK)
+            {
+                DxcBlobImpl *obj = new (std::nothrow)
+                    DxcBlobImpl(out.code, out.size, DXC_CP_UTF8, true);
+                if (obj && obj->valid())
+                {
+                    hr = MakeObjectResult(S_OK, obj, DXC_OUT_DISASSEMBLY, messages,
+                                          riid, (void **)ppResult);
+                    obj->Release();
+                }
+                else
+                {
+                    if (obj) obj->Release();
+                    hr = MakeFailResult(E_OUTOFMEMORY, "LiberX DXC: out of memory.",
+                                        DXC_OUT_DISASSEMBLY, riid, (void **)ppResult);
+                }
+                done = true;
+            }
+            else if (t == 1)
+            {
+                hr = MakeFailResult(E_FAIL,
+                    (messages && messages[0]) ? messages
+                        : "LiberX DXC: disassembly failed (not a recognized "
+                          "DXBC/DXIL container).",
+                    DXC_OUT_DISASSEMBLY, riid, (void **)ppResult);
+            }
+
+            if (messages) vkd3d_shader_free_messages(messages);
+            if (rc == VKD3D_OK) vkd3d_shader_free_shader_code(&out);
+        }
+        return hr;
     }
 };
 
@@ -334,7 +545,7 @@ public:
     ULONG STDMETHODCALLTYPE Release(void) override
     { LONG r = InterlockedDecrement(&m_ref); if (r == 0) delete this; return (ULONG)r; }
 
-    /* Implemented in B0: byte-for-byte blob creation (no compiler needed). */
+    /* Implemented: byte-exact blob creation (no compiler needed). */
     HRESULT STDMETHODCALLTYPE CreateBlob(LPCVOID pData, UINT32 size,
                                          UINT32 codePage,
                                          IDxcBlobEncoding **ppBlobEncoding) override
@@ -345,15 +556,14 @@ public:
         DxcBlobImpl *b = new (std::nothrow) DxcBlobImpl(pData, size, codePage, text);
         if (!b) return E_OUTOFMEMORY;
         if (!b->valid()) { b->Release(); return E_OUTOFMEMORY; }
-        *ppBlobEncoding = b;    /* holds the single reference */
+        *ppBlobEncoding = b;
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE CreateBlobFromPinned(LPCVOID pData, UINT32 size,
                                                    UINT32 codePage,
                                                    IDxcBlobEncoding **ppBlobEncoding) override
     {
-        /* We copy rather than pin; semantically a superset (safe). */
-        return CreateBlob(pData, size, codePage, ppBlobEncoding);
+        return CreateBlob(pData, size, codePage, ppBlobEncoding);   /* we copy */
     }
     HRESULT STDMETHODCALLTYPE GetBlobAsUtf8(IDxcBlob *pBlob,
                                             IDxcBlobUtf8 **ppBlobEncoding) override
@@ -361,14 +571,13 @@ public:
         if (!ppBlobEncoding) return E_POINTER;
         *ppBlobEncoding = nullptr;
         if (!pBlob) return E_INVALIDARG;
-        /* B0: only honor blobs that are already UTF-8 (no transcoding yet). */
         IDxcBlobUtf8 *u = nullptr;
         if (SUCCEEDED(pBlob->QueryInterface(LX_IID_IDxcBlobUtf8, (void **)&u)) && u)
         { *ppBlobEncoding = u; return S_OK; }
-        return LX_DXC_E_NOTIMPL;   /* transcoding wired in B1 */
+        return LX_DXC_E_NOTIMPL;   /* transcoding: B2 */
     }
 
-    /* Not implemented in B0 - honest E_NOTIMPL, never misleading. */
+    /* Not implemented in Level 1 - honest E_NOTIMPL, never misleading. */
     HRESULT STDMETHODCALLTYPE CreateBlobFromBlob(IDxcBlob *, UINT32, UINT32,
                                                  IDxcBlob **pp) override
     { if (pp) *pp = nullptr; return LX_DXC_E_NOTIMPL; }
@@ -387,6 +596,9 @@ public:
     HRESULT STDMETHODCALLTYPE GetBlobAsWide(IDxcBlob *,
                                             IDxcBlobWide **pp) override
     { if (pp) *pp = nullptr; return LX_DXC_E_NOTIMPL; }
+    /* Reflection / container-part extraction: not implemented in Level 1.
+     * Kept DISTINCT from the implemented parse/disassemble/validate paths
+     * (owner req #2) rather than faked. */
     HRESULT STDMETHODCALLTYPE GetDxilContainerPart(const DxcBuffer *, UINT32,
                                                    void **ppPartData,
                                                    UINT32 *pPartSizeInBytes) override
@@ -407,7 +619,8 @@ public:
 };
 
 /* ------------------------------------------------------------------ *
- * IDxcValidator                                                        *
+ * IDxcValidator - structural, UNSIGNED DXIL validation via vkd3d.      *
+ * No Microsoft dxil.dll signing/hash is performed.                    *
  * ------------------------------------------------------------------ */
 class DxcValidatorImpl : public IDxcValidator
 {
@@ -429,11 +642,43 @@ public:
     HRESULT STDMETHODCALLTYPE Validate(IDxcBlob *pShader, UINT32 Flags,
                                        IDxcOperationResult **ppResult) override
     {
-        (void)pShader; (void)Flags;
-        return MakeFailResult(LX_DXC_E_NOTIMPL,
-            "LiberX DXC Level 1 (B0): DXIL validation is not wired in this "
-            "build yet.", DXC_OUT_NONE, LX_IID_IDxcOperationResult,
-            (void **)ppResult);
+        (void)Flags;
+        if (!ppResult) return E_POINTER;
+        *ppResult = nullptr;
+        if (!pShader || !pShader->GetBufferPointer() || !pShader->GetBufferSize())
+            return MakeFailResult(E_INVALIDARG, "LiberX DXC: no shader to validate.",
+                                  DXC_OUT_NONE, LX_IID_IDxcOperationResult,
+                                  (void **)ppResult);
+
+        /* Parse+translate the DXIL as a structural check. Success => structurally
+         * valid (UNSIGNED - no MS dxil.dll hash). Failure => invalid. */
+        struct vkd3d_shader_compile_info ci;
+        memset(&ci, 0, sizeof ci);
+        ci.type        = VKD3D_SHADER_STRUCTURE_TYPE_COMPILE_INFO;
+        ci.source.code = pShader->GetBufferPointer();
+        ci.source.size = pShader->GetBufferSize();
+        ci.source_type = VKD3D_SHADER_SOURCE_DXBC_DXIL;
+        ci.target_type = VKD3D_SHADER_TARGET_D3D_ASM;
+        ci.log_level   = VKD3D_SHADER_LOG_WARNING;
+
+        struct vkd3d_shader_code out;
+        memset(&out, 0, sizeof out);
+        char *messages = nullptr;
+        int rc = vkd3d_shader_compile(&ci, &out, &messages);
+
+        HRESULT hr;
+        if (rc == VKD3D_OK)
+            hr = MakeObjectResult(S_OK, nullptr, DXC_OUT_NONE, messages,
+                                  LX_IID_IDxcOperationResult, (void **)ppResult);
+        else
+            hr = MakeFailResult(E_FAIL,
+                (messages && messages[0]) ? messages
+                    : "LiberX DXC: DXIL structural validation failed.",
+                DXC_OUT_NONE, LX_IID_IDxcOperationResult, (void **)ppResult);
+
+        if (messages) vkd3d_shader_free_messages(messages);
+        if (rc == VKD3D_OK) vkd3d_shader_free_shader_code(&out);
+        return hr;
     }
 };
 
@@ -470,6 +715,6 @@ DxcCreateInstance(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 extern "C" HRESULT __stdcall
 DxcCreateInstance2(IMalloc *pMalloc, REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 {
-    (void)pMalloc;   /* custom allocator not honored in B0 */
+    (void)pMalloc;   /* custom allocator not honored in Level 1 */
     return CreateObject(rclsid, riid, ppv);
 }
