@@ -451,6 +451,7 @@ Enable this if the module uses typeid or dynamic_cast. You will probably need to
     add_subdirectory(tests/liberx-item1)
     add_subdirectory(tests/liberx-item7)
     add_subdirectory(tests/liberx-legacy-render)
+    add_subdirectory(tests/liberx-dxc)
 
     if(ARCH STREQUAL "arm64" AND ENABLE_FEX_ARM64EC AND FEX_ARM64EC_AVAILABLE AND NOT ARM64EC_RUNTIME)
         include(sdk/cmake/arm64ec.cmake)
