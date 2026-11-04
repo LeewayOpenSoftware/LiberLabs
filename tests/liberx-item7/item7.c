@@ -76,7 +76,7 @@ static void test_xaudio27(void)
         hr = ((xa2_mastering27_func)vtable_of(xa)[10])(xa, &voice, 2, 48000, 0, 0, NULL);
         report("xaudio2_7", "mastering-voice", SUCCEEDED(hr) ? "PASS" : "SKIP",
                 "hr=%#lx (a failure needs an audio endpoint and is not a version result)", hr);
-        if (voice)
+        if (SUCCEEDED(hr) && voice)
         {
             hr = ((HRESULT (WINAPI *)(void *))vtable_of(xa)[11])(xa);
             report("xaudio2_7", "start-engine", SUCCEEDED(hr) ? "PASS" : "FAIL", "hr=%#lx", hr);
@@ -111,7 +111,7 @@ static void test_xaudio28(void)
     hr = ((xa2_mastering28_func)vtable_of(xa)[7])(xa, &voice, 2, 48000, 0, NULL, NULL, 0);
     report("xaudio2_8", "mastering-voice", SUCCEEDED(hr) ? "PASS" : "SKIP",
             "hr=%#lx (a failure needs an audio endpoint and is not a version result)", hr);
-    if (voice)
+    if (SUCCEEDED(hr) && voice)
     {
         hr = ((HRESULT (WINAPI *)(void *))vtable_of(xa)[8])(xa);
         report("xaudio2_8", "start-engine", SUCCEEDED(hr) ? "PASS" : "FAIL", "hr=%#lx", hr);
