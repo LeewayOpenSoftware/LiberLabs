@@ -30,6 +30,10 @@
 #include <shellapi.h>
 #include <strsafe.h>
 #include <lm.h>
+#include <setupapi.h>
+#include <cfgmgr32.h>
+#include <initguid.h>
+#include <devguid.h>
 
 #include "netcenter.h"
 
@@ -274,6 +278,105 @@ NC_ADAPTER_LIST *NcEnumerateAdapters(ULONG *Error)
         HeapFree(GetProcessHeap(), 0, buffer);
     *Error = NO_ERROR;
     return list;
+}
+
+/* ---- disabled adapters and enable/disable (device installer) ---- */
+
+static BOOL ReadInstanceGuid(HDEVINFO Set, SP_DEVINFO_DATA *Data, WCHAR *Guid, ULONG Count)
+{
+    HKEY key = SetupDiOpenDevRegKey(Set, Data, DICS_FLAG_GLOBAL, 0, DIREG_DRV, KEY_READ);
+    DWORD type, size = Count * sizeof(WCHAR);
+    LONG result;
+
+    if (key == INVALID_HANDLE_VALUE)
+        return FALSE;
+    result = RegQueryValueExW(key, L"NetCfgInstanceId", NULL, &type, (LPBYTE)Guid, &size);
+    RegCloseKey(key);
+    if (result != ERROR_SUCCESS || type != REG_SZ)
+        return FALSE;
+    Guid[Count - 1] = UNICODE_NULL;
+    return TRUE;
+}
+
+static VOID ReadDeviceName(HDEVINFO Set, SP_DEVINFO_DATA *Data, WCHAR *Name, ULONG Count)
+{
+    Name[0] = UNICODE_NULL;
+    if (!SetupDiGetDeviceRegistryPropertyW(Set, Data, SPDRP_FRIENDLYNAME, NULL, (PBYTE)Name, Count * sizeof(WCHAR), NULL) || !Name[0])
+        SetupDiGetDeviceRegistryPropertyW(Set, Data, SPDRP_DEVICEDESC, NULL, (PBYTE)Name, Count * sizeof(WCHAR), NULL);
+    Name[Count - 1] = UNICODE_NULL;
+}
+
+DWORD NcEnumerateDisabledAdapters(NC_DEVICE_LIST *List)
+{
+    HDEVINFO set;
+    SP_DEVINFO_DATA data;
+    DWORD index, error = NO_ERROR;
+
+    RtlZeroMemory(List, sizeof(*List));
+    set = SetupDiGetClassDevsW(&GUID_DEVCLASS_NET, NULL, NULL, DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE)
+        return GetLastError();
+    for (index = 0; List->Count < NC_MAX_DEVICES; index++)
+    {
+        ULONG status = 0, problem = 0;
+        NC_DEVICE *entry = &List->Devices[List->Count];
+
+        RtlZeroMemory(&data, sizeof(data));
+        data.cbSize = sizeof(data);
+        if (!SetupDiEnumDeviceInfo(set, index, &data))
+        {
+            error = GetLastError();
+            break;
+        }
+        if (CM_Get_DevNode_Status(&status, &problem, data.DevInst, 0) != CR_SUCCESS)
+            continue;
+        if (!(status & DN_HAS_PROBLEM) || problem != CM_PROB_DISABLED)
+            continue;
+        if (!ReadInstanceGuid(set, &data, entry->Guid, ARRAYSIZE(entry->Guid)))
+            continue;   /* without its id it cannot be enabled from here, so it is not offered */
+        ReadDeviceName(set, &data, entry->Name, ARRAYSIZE(entry->Name));
+        List->Count++;
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    return (error == ERROR_NO_MORE_ITEMS) ? NO_ERROR : error;
+}
+
+DWORD NcSetAdapterEnabled(PCWSTR Guid, BOOL Enable)
+{
+    HDEVINFO set;
+    SP_DEVINFO_DATA data;
+    DWORD index, error = ERROR_NOT_FOUND;
+
+    set = SetupDiGetClassDevsW(&GUID_DEVCLASS_NET, NULL, NULL, DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE)
+        return GetLastError();
+    for (index = 0; ; index++)
+    {
+        WCHAR id[NC_TEXT];
+        SP_PROPCHANGE_PARAMS change;
+
+        RtlZeroMemory(&data, sizeof(data));
+        data.cbSize = sizeof(data);
+        if (!SetupDiEnumDeviceInfo(set, index, &data))
+            break;
+        if (!ReadInstanceGuid(set, &data, id, ARRAYSIZE(id)) || _wcsicmp(id, Guid))
+            continue;
+
+        RtlZeroMemory(&change, sizeof(change));
+        change.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+        change.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+        change.StateChange = Enable ? DICS_ENABLE : DICS_DISABLE;
+        change.Scope = DICS_FLAG_GLOBAL;
+        change.HwProfile = 0;
+        if (!SetupDiSetClassInstallParamsW(set, &data, &change.ClassInstallHeader, sizeof(change)) ||
+            !SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, set, &data))
+            error = GetLastError();
+        else
+            error = NO_ERROR;
+        break;
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    return error;
 }
 
 VOID NcFreeAdapterList(NC_ADAPTER_LIST *List)

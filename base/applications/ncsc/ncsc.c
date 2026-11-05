@@ -25,6 +25,7 @@
 #define WM_NCSC_PROBED  (WM_APP + 1)  /* lParam: NC_ACCESS allocated with LocalAlloc */
 #define WM_NCSC_TEXT    (WM_APP + 2)  /* lParam: WCHAR text allocated with LocalAlloc */
 #define WM_NCSC_NETCHANGE (WM_APP + 3) /* an interface or address changed */
+#define WM_NCSC_ACTION  (WM_APP + 4)  /* wParam: Win32 error of an enable/disable, lParam: TRUE when it was an enable */
 #define TIMER_REFRESH   1
 #define TIMER_CHANGE    2
 #define CHANGE_DELAY_MS 400
@@ -44,6 +45,8 @@ enum LinkAction
     LA_FIREWALL,
     LA_STATUS,      /* arg: adapter index */
     LA_IPCONFIG,
+    LA_ENABLE,      /* arg: index in g_Disabled */
+    LA_DISABLE,     /* arg: adapter index */
     LA_PROPERTIES   /* arg: adapter index */
 };
 
@@ -62,6 +65,9 @@ static NC_ADAPTER_LIST *g_List;
 static ULONG g_ListError;
 static NC_IDENTITY g_Identity;
 static NC_FEATURES g_Features;
+static NC_DEVICE_LIST g_Disabled;   /* adapters the device manager reports as disabled */
+static DWORD g_DisabledError;
+static BOOL g_ActionRunning;        /* an enable or disable is in progress */
 static NC_ACCESS g_Access;
 static BOOL g_ProbeRunning, g_ProbeDone;
 static ULONG g_ProbeGen;      /* generation of the latest probe started */
@@ -175,6 +181,7 @@ static VOID Refresh(BOOL Probe)
     g_List = list;
     NcGetIdentity(&g_Identity);
     NcQueryFeatures(&g_Features);
+    g_DisabledError = NcEnumerateDisabledAdapters(&g_Disabled);
     /* A different set of adapters, addresses or gateways than the one measured: the old verdict is stale */
     if (g_ProbeDone && NcAdapterSignature(g_List) != g_ProbeSig)
     {
@@ -514,7 +521,8 @@ static int PaintContent(HDC hdc, int x0, int width)
             int lx = x + 24;
 
             lx += AddLink(hdc, lx, y, L"View status", LA_STATUS, (int)i, TRUE) + 24;
-            AddLink(hdc, lx, y, L"Properties", LA_PROPERTIES, (int)i, NcToolAvailable(NC_TOOL_CONNECTIONS));
+            lx += AddLink(hdc, lx, y, L"Properties", LA_PROPERTIES, (int)i, NcToolAvailable(NC_TOOL_CONNECTIONS)) + 24;
+            AddLink(hdc, lx, y, L"Disable", LA_DISABLE, (int)i, !g_ActionRunning);
         }
         y += lh + 4;
         {
@@ -551,6 +559,25 @@ static int PaintContent(HDC hdc, int x0, int width)
             Text(hdc, g_FontNormal, COLOR_BAD, x + 260, y, NcLinkText(a->Link));
             AddLink(hdc, x + 480, y, L"View status", LA_STATUS, (int)i, TRUE);
             y += lh;
+        }
+        /* the IP helper does not list a disabled adapter at all: the device manager is the source here */
+        for (i = 0; i < g_Disabled.Count; i++)
+        {
+            if (!header)
+            {
+                y += 8;
+                Text(hdc, g_FontBold, COLOR_TITLE, x, y, L"Adapters that are not connected"); y += lh + 4;
+                header = TRUE;
+            }
+            Text(hdc, g_FontNormal, 0, x + 12, y, g_Disabled.Devices[i].Name);
+            Text(hdc, g_FontNormal, COLOR_BAD, x + 260, y, L"Disabled");
+            AddLink(hdc, x + 480, y, L"Enable", LA_ENABLE, (int)i, !g_ActionRunning);
+            y += lh;
+        }
+        if (g_DisabledError != NO_ERROR)
+        {
+            StringCchPrintfW(line, ARRAYSIZE(line), L"Disabled adapters cannot be listed on this system (error %lu).", g_DisabledError);
+            Text(hdc, g_FontSmall, COLOR_GRAY, x + 12, y, line); y += lh;
         }
     }
     y += 8;
@@ -847,6 +874,64 @@ static VOID Failed(HWND hwnd, PCWSTR what)
     MessageBoxW(hwnd, what, L"Network and Sharing Center", MB_OK | MB_ICONWARNING);
 }
 
+typedef struct _ACTION_JOB
+{
+    WCHAR Guid[NC_TEXT];
+    BOOL Enable;
+} ACTION_JOB;
+
+static DWORD WINAPI ActionThread(LPVOID Param)
+{
+    ACTION_JOB *job = Param;
+    DWORD error = NcSetAdapterEnabled(job->Guid, job->Enable);
+
+    PostMessageW(g_Main, WM_NCSC_ACTION, (WPARAM)error, (LPARAM)job->Enable);
+    LocalFree(job);
+    return 0;
+}
+
+static VOID StartAdapterAction(HWND hwnd, PCWSTR Guid, BOOL Enable)
+{
+    ACTION_JOB *job;
+    HANDLE thread;
+
+    if (g_ActionRunning)
+        return;
+    job = LocalAlloc(LPTR, sizeof(*job));
+    if (!job)
+        return;
+    StringCchCopyW(job->Guid, ARRAYSIZE(job->Guid), Guid);
+    job->Enable = Enable;
+    thread = CreateThread(NULL, 0, ActionThread, job, 0, NULL);
+    if (!thread)
+    {
+        LocalFree(job);
+        Failed(hwnd, L"The operation could not be started.");
+        return;
+    }
+    CloseHandle(thread);
+    g_ActionRunning = TRUE;
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
+static VOID ActionDone(HWND hwnd, DWORD error, BOOL Enable)
+{
+    WCHAR text[200];
+
+    g_ActionRunning = FALSE;
+    if (error == ERROR_ACCESS_DENIED)
+        StringCchCopyW(text, ARRAYSIZE(text), L"Administrator rights are required to enable or disable a network adapter.");
+    else if (error == ERROR_NOT_SUPPORTED || error == ERROR_CALL_NOT_IMPLEMENTED || error == ERROR_PROC_NOT_FOUND)
+        StringCchCopyW(text, ARRAYSIZE(text), L"This system cannot enable or disable the adapter from here (not supported).");
+    else if (error != NO_ERROR)
+        StringCchPrintfW(text, ARRAYSIZE(text), L"The adapter could not be %s (error %lu).", Enable ? L"enabled" : L"disabled", error);
+    if (error != NO_ERROR)
+        Failed(hwnd, text);
+    /* the stack reports the change through the notifications; refresh now as well in case it does not */
+    SetTimer(hwnd, TIMER_CHANGE, CHANGE_DELAY_MS, NULL);
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 static VOID DoLink(HWND hwnd, const LINK *link)
 {
     if (!link->Enabled)
@@ -873,6 +958,21 @@ static VOID DoLink(HWND hwnd, const LINK *link)
         case LA_IPCONFIG:
             if (!NcLaunchTool(hwnd, NC_TOOL_IPCONFIG))
                 Failed(hwnd, L"ipconfig could not be started.");
+            break;
+        case LA_ENABLE:
+            if ((ULONG)link->Arg < g_Disabled.Count)
+                StartAdapterAction(hwnd, g_Disabled.Devices[link->Arg].Guid, TRUE);
+            break;
+        case LA_DISABLE:
+            if (g_List && (ULONG)link->Arg < g_List->Count)
+            {
+                const NC_ADAPTER *a = &g_List->Adapters[link->Arg];
+                WCHAR question[300];
+
+                StringCchPrintfW(question, ARRAYSIZE(question), L"Disable \"%s\"? Network access through it stops until it is enabled again; it can be enabled again from this window.", a->Name);
+                if (MessageBoxW(hwnd, question, L"Network and Sharing Center", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES)
+                    StartAdapterAction(hwnd, a->Guid, FALSE);
+            }
             break;
         case LA_DIAGNOSE:
             RunDiagnosticsWindow(hwnd);
@@ -980,6 +1080,9 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             InvalidateRect(hwnd, NULL, TRUE);
             return 0;
         }
+        case WM_NCSC_ACTION:
+            ActionDone(hwnd, (DWORD)wParam, (BOOL)lParam);
+            return 0;
         case WM_NCSC_NETCHANGE:
             /* several notifications arrive together: refresh once, and stop showing the old verdict now */
             InvalidateAccess();

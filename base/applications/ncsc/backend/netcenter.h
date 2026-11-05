@@ -159,6 +159,30 @@ typedef struct _NC_DIAG_REPORT
 /* Called after each step with the report so far; may be NULL. Runs on the calling thread. */
 typedef VOID (CALLBACK *NC_DIAG_PROGRESS)(const NC_DIAG_REPORT *Report, PVOID Context);
 
+/* Network adapters that the device manager reports as disabled. The IP helper does not list them at all,
+ * so this is the only place they can be seen. */
+#define NC_MAX_DEVICES 16
+
+typedef struct _NC_DEVICE
+{
+    WCHAR Name[NC_TEXT * 2];
+    WCHAR Guid[NC_TEXT];            /* NetCfgInstanceId, equal to NC_ADAPTER.Guid of the same adapter when enabled */
+} NC_DEVICE;
+
+typedef struct _NC_DEVICE_LIST
+{
+    ULONG Count;
+    NC_DEVICE Devices[NC_MAX_DEVICES];
+} NC_DEVICE_LIST;
+
+/* Fills List with the disabled adapters; returns NO_ERROR or the Win32 error that stopped the query */
+DWORD NcEnumerateDisabledAdapters(NC_DEVICE_LIST *List);
+
+/* Enables or disables the adapter with this NetCfgInstanceId through the device installer
+ * (DIF_PROPERTYCHANGE). Returns NO_ERROR or a Win32 error (ERROR_ACCESS_DENIED without administrator rights,
+ * ERROR_NOT_FOUND for an unknown adapter, ERROR_NOT_SUPPORTED where the installer cannot do it). Blocks. */
+DWORD NcSetAdapterEnabled(PCWSTR Guid, BOOL Enable);
+
 /* Adapters. Returns NULL and sets *Error when the stack cannot be queried. Free with NcFreeAdapterList. */
 NC_ADAPTER_LIST *NcEnumerateAdapters(ULONG *Error);
 VOID NcFreeAdapterList(NC_ADAPTER_LIST *List);
