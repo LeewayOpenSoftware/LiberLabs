@@ -27,6 +27,7 @@ extern void func_WSAIoctl(void);
 extern void func_WSARecv(void);
 extern void func_WSABufferArray(void);
 extern void func_WSAStartup(void);
+extern void func_WSAStringToAddress(void);
 
 const struct test winetest_testlist[] =
 {
@@ -55,6 +56,7 @@ const struct test winetest_testlist[] =
     { "WSARecv", func_WSARecv },
     { "WSABufferArray", func_WSABufferArray },
     { "WSAStartup", func_WSAStartup },
+    { "WSAStringToAddress", func_WSAStringToAddress },
     { 0, 0 }
 };
 
