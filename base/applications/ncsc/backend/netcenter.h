@@ -179,7 +179,7 @@ typedef struct _NC_DEVICE_LIST
 DWORD NcEnumerateDisabledAdapters(NC_DEVICE_LIST *List);
 
 /* Enables or disables the adapter with this NetCfgInstanceId through the device installer
- * (DIF_PROPERTYCHANGE). Returns NO_ERROR or a Win32 error (ERROR_ACCESS_DENIED without administrator rights,
+ * (DIF_PROPERTYCHANGE, current hardware profile, as the Network Connections folder does). Returns NO_ERROR or a Win32 error (ERROR_ACCESS_DENIED without administrator rights,
  * ERROR_NOT_FOUND for an unknown adapter, ERROR_NOT_SUPPORTED where the installer cannot do it). Blocks. */
 DWORD NcSetAdapterEnabled(PCWSTR Guid, BOOL Enable);
 

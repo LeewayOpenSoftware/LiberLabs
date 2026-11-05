@@ -341,6 +341,37 @@ DWORD NcEnumerateDisabledAdapters(NC_DEVICE_LIST *List)
     return (error == ERROR_NO_MORE_ITEMS) ? NO_ERROR : error;
 }
 
+/* The Network Connections folder (netshell) records the state it sets for the current hardware profile in the
+ * CSConfigFlags value of the device's Enum key; do the same so the folder and this window agree on it. */
+static VOID WriteProfileFlags(PCWSTR Guid, DWORD Flags)
+{
+    WCHAR path[MAX_PATH * 2], pnp[MAX_PATH];
+    DWORD size = sizeof(pnp), type;
+    HKEY key;
+
+    if (FAILED(StringCchPrintfW(path, ARRAYSIZE(path),
+                                L"SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\%s\\Connection", Guid)))
+        return;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, path, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
+        return;
+    pnp[0] = UNICODE_NULL;
+    if (RegQueryValueExW(key, L"PnpInstanceID", NULL, &type, (LPBYTE)pnp, &size) != ERROR_SUCCESS || type != REG_SZ)
+    {
+        RegCloseKey(key);
+        return;
+    }
+    RegCloseKey(key);
+    pnp[ARRAYSIZE(pnp) - 1] = UNICODE_NULL;
+    if (FAILED(StringCchPrintfW(path, ARRAYSIZE(path),
+                                L"System\\CurrentControlSet\\Hardware Profiles\\Current\\System\\CurrentControlSet\\Enum\\%s", pnp)))
+        return;
+    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, path, 0, NULL, 0, KEY_SET_VALUE, NULL, &key, NULL) == ERROR_SUCCESS)
+    {
+        RegSetValueExW(key, L"CSConfigFlags", 0, REG_DWORD, (const BYTE *)&Flags, sizeof(Flags));
+        RegCloseKey(key);
+    }
+}
+
 DWORD NcSetAdapterEnabled(PCWSTR Guid, BOOL Enable)
 {
     HDEVINFO set;
@@ -366,13 +397,15 @@ DWORD NcSetAdapterEnabled(PCWSTR Guid, BOOL Enable)
         change.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
         change.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
         change.StateChange = Enable ? DICS_ENABLE : DICS_DISABLE;
-        change.Scope = DICS_FLAG_GLOBAL;
+        change.Scope = DICS_FLAG_CONFIGSPECIFIC;   /* the same scope the Network Connections folder uses */
         change.HwProfile = 0;
         if (!SetupDiSetClassInstallParamsW(set, &data, &change.ClassInstallHeader, sizeof(change)) ||
             !SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, set, &data))
             error = GetLastError();
         else
             error = NO_ERROR;
+        if (error == NO_ERROR)
+            WriteProfileFlags(Guid, Enable ? 0 : 1);
         break;
     }
     SetupDiDestroyDeviceInfoList(set);
