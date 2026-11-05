@@ -334,6 +334,50 @@ static NC_LEVEL AdapterLevel(const NC_ADAPTER *a, BOOL v6)
     return probed == NC_LEVEL_INTERNET ? NC_LEVEL_INTERNET : NC_LEVEL_LOCAL;
 }
 
+/* One line of the real configuration for an address family: the address that decides the level (a routable
+ * one before a link-local one), its prefix, the gateway and the first DNS server of that family. */
+static VOID AddressSummary(const NC_ADAPTER *a, BOOL v6, WCHAR *out, UINT count)
+{
+    const NC_IPADDR *best = NULL;
+    ULONG i;
+    PCWSTR gateway = NULL, dns = NULL;
+    WCHAR part[NC_TEXT * 2];
+
+    out[0] = UNICODE_NULL;
+    for (i = 0; i < a->AddressCount; i++)
+    {
+        const NC_IPADDR *entry = &a->Addresses[i];
+
+        if ((entry->IsV6 != 0) != (v6 != 0))
+            continue;
+        if (!best || (best->IsLinkLocal && !entry->IsLinkLocal))
+            best = entry;
+    }
+    for (i = 0; i < a->GatewayCount && !gateway; i++)
+        if ((wcschr(a->Gateways[i], L':') != NULL) == (v6 != 0))
+            gateway = a->Gateways[i];
+    for (i = 0; i < a->DnsCount && !dns; i++)
+        if ((wcschr(a->DnsServers[i], L':') != NULL) == (v6 != 0))
+            dns = a->DnsServers[i];
+
+    if (!best)
+    {
+        StringCchCopyW(out, count, L"no address");
+        return;
+    }
+    StringCchPrintfW(out, count, L"%s/%lu%s", best->Text, best->PrefixLength, best->IsLinkLocal ? L" (link-local)" : L"");
+    if (gateway)
+    {
+        StringCchPrintfW(part, ARRAYSIZE(part), L", gateway %s", gateway);
+        StringCchCatW(out, count, part);
+    }
+    if (dns)
+    {
+        StringCchPrintfW(part, ARRAYSIZE(part), L", DNS %s", dns);
+        StringCchCatW(out, count, part);
+    }
+}
+
 static PCWSTR StateText(NC_STATE state)
 {
     switch (state)
@@ -459,9 +503,13 @@ static int PaintContent(HDC hdc, int x0, int width)
         StringCchPrintfW(line, ARRAYSIZE(line), L"%s", a->Description);
         Text(hdc, g_FontSmall, COLOR_GRAY, x + 12, y, line); y += lh - 2;
         Text(hdc, g_FontNormal, 0, x + 24, y, L"IPv4 connectivity:");
-        Text(hdc, g_FontNormal, LevelColor(v4), x + 190, y, NcLevelText(v4)); y += lh;
+        Text(hdc, g_FontNormal, LevelColor(v4), x + 190, y, NcLevelText(v4));
+        AddressSummary(a, FALSE, line, ARRAYSIZE(line));
+        Text(hdc, g_FontSmall, COLOR_GRAY, x + 320, y + 1, line); y += lh;
         Text(hdc, g_FontNormal, 0, x + 24, y, L"IPv6 connectivity:");
-        Text(hdc, g_FontNormal, LevelColor(v6), x + 190, y, NcLevelText(v6)); y += lh;
+        Text(hdc, g_FontNormal, LevelColor(v6), x + 190, y, NcLevelText(v6));
+        AddressSummary(a, TRUE, line, ARRAYSIZE(line));
+        Text(hdc, g_FontSmall, COLOR_GRAY, x + 320, y + 1, line); y += lh;
         {
             int lx = x + 24;
 
