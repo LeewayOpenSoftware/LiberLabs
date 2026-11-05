@@ -125,6 +125,7 @@ struct d3d_texture1d
     struct wined3d_texture *wined3d_texture;
     D3D11_TEXTURE1D_DESC desc;
     ID3D11Device5 *device;
+    UINT eviction_priority;
 };
 
 HRESULT d3d_texture1d_create(struct d3d_device *device, const D3D11_TEXTURE1D_DESC *desc,
@@ -144,6 +145,7 @@ struct d3d_texture2d
     struct wined3d_swapchain *swapchain;
     D3D11_TEXTURE2D_DESC desc;
     ID3D11Device5 *device;
+    UINT eviction_priority;
 };
 
 static inline struct d3d_texture2d *impl_from_ID3D11Texture2D(ID3D11Texture2D *iface)
@@ -168,6 +170,7 @@ struct d3d_texture3d
     struct wined3d_texture *wined3d_texture;
     D3D11_TEXTURE3D_DESC desc;
     ID3D11Device5 *device;
+    UINT eviction_priority;
 };
 
 HRESULT d3d_texture3d_create(struct d3d_device *device, const D3D11_TEXTURE3D_DESC *desc,
@@ -186,6 +189,7 @@ struct d3d_buffer
     struct wined3d_buffer *wined3d_buffer;
     D3D11_BUFFER_DESC desc;
     ID3D11Device5 *device;
+    UINT eviction_priority;
 };
 
 HRESULT d3d_buffer_create(struct d3d_device *device, const D3D11_BUFFER_DESC *desc,

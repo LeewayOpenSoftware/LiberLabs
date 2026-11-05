@@ -173,14 +173,27 @@ static void STDMETHODCALLTYPE d3d11_buffer_GetType(ID3D11Buffer *iface,
 
 static void STDMETHODCALLTYPE d3d11_buffer_SetEvictionPriority(ID3D11Buffer *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %#x stub!\n", iface, eviction_priority);
+    struct d3d_buffer *buffer = impl_from_ID3D11Buffer(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    wined3d_mutex_lock();
+    buffer->eviction_priority = eviction_priority;
+    wined3d_mutex_unlock();
 }
 
 static UINT STDMETHODCALLTYPE d3d11_buffer_GetEvictionPriority(ID3D11Buffer *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_buffer *buffer = impl_from_ID3D11Buffer(iface);
+    UINT eviction_priority;
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    eviction_priority = buffer->eviction_priority;
+    wined3d_mutex_unlock();
+
+    return eviction_priority;
 }
 
 static void STDMETHODCALLTYPE d3d11_buffer_GetDesc(ID3D11Buffer *iface, D3D11_BUFFER_DESC *desc)
@@ -309,14 +322,20 @@ static void STDMETHODCALLTYPE d3d10_buffer_GetType(ID3D10Buffer *iface, D3D10_RE
 
 static void STDMETHODCALLTYPE d3d10_buffer_SetEvictionPriority(ID3D10Buffer *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %u stub!\n", iface, eviction_priority);
+    struct d3d_buffer *buffer = impl_from_ID3D10Buffer(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    d3d11_buffer_SetEvictionPriority(&buffer->ID3D11Buffer_iface, eviction_priority);
 }
 
 static UINT STDMETHODCALLTYPE d3d10_buffer_GetEvictionPriority(ID3D10Buffer *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_buffer *buffer = impl_from_ID3D10Buffer(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    return d3d11_buffer_GetEvictionPriority(&buffer->ID3D11Buffer_iface);
 }
 
 /* ID3D10Buffer methods */
