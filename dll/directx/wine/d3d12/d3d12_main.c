@@ -30,10 +30,6 @@ HRESULT d3d12_native_create_device(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_
         void **device);
 #endif
 
-/* Forward declare vkd3d-utils D3D12CreateDeviceVKD3D for wrapper */
-extern HRESULT WINAPI D3D12CreateDeviceVKD3D(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_feature_level,
-        REFIID iid, void **device, enum vkd3d_api_version api_version);
-
 static HRESULT
 d3d12_signal_event(HANDLE event)
 {
@@ -148,10 +144,42 @@ d3d12_create_configured_device(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_feat
     return d3d12_create_vkd3d_device(adapter, minimum_feature_level, configuration, iid, device);
 }
 
+static BOOL d3d12_is_valid_feature_level(D3D_FEATURE_LEVEL level)
+{
+    switch (level)
+    {
+        case D3D_FEATURE_LEVEL_9_1:
+        case D3D_FEATURE_LEVEL_9_2:
+        case D3D_FEATURE_LEVEL_9_3:
+        case D3D_FEATURE_LEVEL_10_0:
+        case D3D_FEATURE_LEVEL_10_1:
+        case D3D_FEATURE_LEVEL_11_0:
+        case D3D_FEATURE_LEVEL_11_1:
+        case D3D_FEATURE_LEVEL_12_0:
+        case D3D_FEATURE_LEVEL_12_1:
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
+/* The D3D12CreateDevice export (d3d12.spec). COM contract: the output pointer is
+ * NULL on every failure, and an invalid feature level fails before any backend runs. */
 HRESULT WINAPI
 d3d12_create_device(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_feature_level, REFIID iid, void **device)
 {
-    return d3d12_create_configured_device(adapter, minimum_feature_level, NULL, iid, device);
+    HRESULT hr;
+
+    if (device)
+        *device = NULL;
+
+    if (!d3d12_is_valid_feature_level(minimum_feature_level))
+        return E_INVALIDARG;
+
+    hr = d3d12_create_configured_device(adapter, minimum_feature_level, NULL, iid, device);
+    if (FAILED(hr) && device)
+        *device = NULL;
+    return hr;
 }
 
 struct d3d12_dred_state
@@ -741,41 +769,6 @@ static HRESULT d3d12_device_factory_create(REFIID iid, void **out)
     factory->refcount = 1;
     hr = ID3D12DeviceFactory_QueryInterface(&factory->ID3D12DeviceFactory_iface, iid, out);
     ID3D12DeviceFactory_Release(&factory->ID3D12DeviceFactory_iface);
-    return hr;
-}
-
-/* Wrapper for D3D12CreateDevice that ensures output pointer is NULL on failure */
-HRESULT WINAPI
-D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_feature_level,
-        REFIID iid, void **device)
-{
-    HRESULT hr;
-
-    /* NULL output unconditionally per COM contract */
-    if (device)
-        *device = NULL;
-
-    /* Validate feature level (0x1 and other invalid levels should fail) */
-    if (minimum_feature_level != D3D_FEATURE_LEVEL_9_1 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_9_2 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_9_3 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_10_0 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_10_1 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_11_0 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_11_1 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_12_0 &&
-        minimum_feature_level != D3D_FEATURE_LEVEL_12_1)
-    {
-        return E_INVALIDARG;
-    }
-
-    /* Call vkd3d implementation */
-    hr = D3D12CreateDeviceVKD3D(adapter, minimum_feature_level, iid, device, VKD3D_API_VERSION_1_0);
-
-    /* Ensure output is NULL on failure per COM contract */
-    if (FAILED(hr) && device)
-        *device = NULL;
-
     return hr;
 }
 
