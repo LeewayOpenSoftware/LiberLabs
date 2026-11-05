@@ -165,6 +165,8 @@ static VOID InvalidateAccess(VOID)
     RtlZeroMemory(&g_Access, sizeof(g_Access));
 }
 
+static VOID UpdateStatusWindows(VOID);
+
 static VOID Refresh(BOOL Probe)
 {
     NC_ADAPTER_LIST *list = NcEnumerateAdapters(&g_ListError);
@@ -182,6 +184,7 @@ static VOID Refresh(BOOL Probe)
     if (Probe)
         StartProbe();
     InvalidateRect(g_Main, NULL, TRUE);
+    UpdateStatusWindows();
 }
 
 /* ---- drawing helpers ---- */
@@ -648,6 +651,77 @@ static VOID FormatAdapterDetails(const NC_ADAPTER *a, WCHAR *out, UINT count)
 #undef ADD
 }
 
+/* Open "Connection status" windows follow their adapter (found by its name, not by list position) and are
+ * rewritten after every refresh, so a link change shows in them without closing and reopening. */
+#define MAX_STATUS_WINDOWS 8
+static HWND g_StatusWindow[MAX_STATUS_WINDOWS];
+static WCHAR g_StatusGuid[MAX_STATUS_WINDOWS][NC_TEXT];
+
+static HWND OpenStatusWindow(HWND owner, const NC_ADAPTER *a)
+{
+    WCHAR text[1600];
+    HWND hwnd;
+    int slot = -1, i;
+
+    for (i = 0; i < MAX_STATUS_WINDOWS; i++)
+    {
+        if (g_StatusWindow[i] && IsWindow(g_StatusWindow[i]) && !wcscmp(g_StatusGuid[i], a->Guid))
+        {
+            SetForegroundWindow(g_StatusWindow[i]);     /* already open for this adapter */
+            return g_StatusWindow[i];
+        }
+        if (slot < 0 && (!g_StatusWindow[i] || !IsWindow(g_StatusWindow[i])))
+            slot = i;
+    }
+    FormatAdapterDetails(a, text, ARRAYSIZE(text));
+    hwnd = OpenTextWindow(owner, L"Connection status", text);
+    if (hwnd && slot >= 0)
+    {
+        g_StatusWindow[slot] = hwnd;
+        StringCchCopyW(g_StatusGuid[slot], NC_TEXT, a->Guid);
+    }
+    return hwnd;
+}
+
+static VOID UpdateStatusWindows(VOID)
+{
+    WCHAR text[1600], old[1600];
+    int i;
+    ULONG j;
+
+    for (i = 0; i < MAX_STATUS_WINDOWS; i++)
+    {
+        HWND edit;
+        const NC_ADAPTER *found = NULL;
+
+        if (!g_StatusWindow[i])
+            continue;
+        if (!IsWindow(g_StatusWindow[i]))
+        {
+            g_StatusWindow[i] = NULL;
+            continue;
+        }
+        for (j = 0; g_List && j < g_List->Count; j++)
+        {
+            if (!wcscmp(g_List->Adapters[j].Guid, g_StatusGuid[i]))
+            {
+                found = &g_List->Adapters[j];
+                break;
+            }
+        }
+        if (found)
+            FormatAdapterDetails(found, text, ARRAYSIZE(text));
+        else
+            StringCchCopyW(text, ARRAYSIZE(text), L"This adapter is no longer reported by the network stack (removed or disabled).\r\n");
+        edit = GetDlgItem(g_StatusWindow[i], 100);
+        old[0] = UNICODE_NULL;
+        if (edit)
+            GetWindowTextW(edit, old, ARRAYSIZE(old));
+        if (edit && wcscmp(old, text))     /* rewrite only on a change, so a selection is not lost every 15 s */
+            SetWindowTextW(edit, text);
+    }
+}
+
 static VOID FormatReport(const NC_DIAG_REPORT *report, WCHAR *out, UINT count)
 {
     ULONG i;
@@ -727,8 +801,6 @@ static VOID Failed(HWND hwnd, PCWSTR what)
 
 static VOID DoLink(HWND hwnd, const LINK *link)
 {
-    WCHAR text[1600];
-
     if (!link->Enabled)
         return;
     switch (link->Action)
@@ -763,10 +835,7 @@ static VOID DoLink(HWND hwnd, const LINK *link)
             break;
         case LA_STATUS:
             if (g_List && (ULONG)link->Arg < g_List->Count)
-            {
-                FormatAdapterDetails(&g_List->Adapters[link->Arg], text, ARRAYSIZE(text));
-                OpenTextWindow(hwnd, L"Connection status", text);
-            }
+                OpenStatusWindow(hwnd, &g_List->Adapters[link->Arg]);
             break;
     }
 }
