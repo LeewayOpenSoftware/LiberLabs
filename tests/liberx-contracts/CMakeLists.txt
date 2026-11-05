@@ -23,3 +23,8 @@ add_executable(liberx_dwrite_locality dwrite-locality.c)
 set_module_type(liberx_dwrite_locality win32cui)
 add_dependencies(liberx_dwrite_locality psdk)
 add_importlibs(liberx_dwrite_locality msvcrt kernel32 dwrite)
+
+add_executable(liberx_dwrite_download_queue dwrite-download-queue.c)
+set_module_type(liberx_dwrite_download_queue win32cui)
+add_dependencies(liberx_dwrite_download_queue psdk)
+add_importlibs(liberx_dwrite_download_queue msvcrt kernel32 dwrite)

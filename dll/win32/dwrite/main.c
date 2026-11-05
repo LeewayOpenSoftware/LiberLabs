@@ -2228,37 +2228,54 @@ static ULONG WINAPI dwritefontdownloadqueue_Release(IDWriteFontDownloadQueue *if
 static HRESULT WINAPI dwritefontdownloadqueue_AddListener(IDWriteFontDownloadQueue *iface,
         IDWriteFontDownloadListener *listener, UINT32 *token)
 {
-    FIXME("%p, %p, %p stub!\n", iface, listener, token);
-    return E_NOTIMPL;
+    TRACE("%p, %p, %p.\n", iface, listener, token);
+
+    if (!listener || !token)
+        return E_INVALIDARG;
+
+    /* No remote fonts are used in this build, so the queue never downloads and a
+     * registered listener is never invoked. Accept the registration and hand
+     * back a token; the listener stays inert. */
+    *token = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontdownloadqueue_RemoveListener(IDWriteFontDownloadQueue *iface, UINT32 token)
 {
-    FIXME("%p, %#x stub!\n", iface, token);
-    return E_NOTIMPL;
+    TRACE("%p, %#x.\n", iface, token);
+
+    return S_OK;
 }
 
 static BOOL WINAPI dwritefontdownloadqueue_IsEmpty(IDWriteFontDownloadQueue *iface)
 {
-    FIXME("%p stub!\n", iface);
+    TRACE("%p.\n", iface);
+
+    /* Nothing is ever enqueued (no remote fonts), so the queue is always empty. */
     return TRUE;
 }
 
 static HRESULT WINAPI dwritefontdownloadqueue_BeginDownload(IDWriteFontDownloadQueue *iface, IUnknown *context)
 {
-    FIXME("%p, %p stub!\n", iface, context);
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, context);
+
+    /* The queue is always empty, so there is nothing to download; succeed. */
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontdownloadqueue_CancelDownload(IDWriteFontDownloadQueue *iface)
 {
-    FIXME("%p stub!\n", iface);
-    return E_NOTIMPL;
+    TRACE("%p.\n", iface);
+
+    /* Nothing is queued, so there is nothing to cancel. */
+    return S_OK;
 }
 
 static UINT64 WINAPI dwritefontdownloadqueue_GetGenerationCount(IDWriteFontDownloadQueue *iface)
 {
-    FIXME("%p stub!\n", iface);
+    TRACE("%p.\n", iface);
+
+    /* The queue never changes (always empty), so the generation count stays 0. */
     return 0;
 }
 
