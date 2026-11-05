@@ -3,6 +3,7 @@
 add_library(netcenter STATIC backend/netcenter.c)
 target_include_directories(netcenter INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/backend)
 target_include_directories(netcenter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/backend)
+target_compile_definitions(netcenter PRIVATE UNICODE _UNICODE)
 add_dependencies(netcenter psdk)
 
 add_rc_deps(ncsc.rc ${CMAKE_CURRENT_SOURCE_DIR}/res/ncsc.ico)

@@ -7,6 +7,15 @@
 
 #include <stdio.h>
 
+/* The backend is a static library that does not get the module-type defines: the wide-character
+ * types (PDNS_RECORD) must match the W calls it makes. */
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+
 #define WIN32_NO_STATUS
 #include <windef.h>
 #include <winbase.h>
