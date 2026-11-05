@@ -6,6 +6,7 @@
  */
 
 #include "precomp.h"
+#include <cfgmgr32.h>
 
 VOID NormalizeOperStatus(MIB_IFROW *IfEntry, NETCON_PROPERTIES * Props);
 
@@ -230,7 +231,16 @@ CNetConnection::GetProperties(NETCON_PROPERTIES **ppProps)
     ZeroMemory(&IfEntry, sizeof(IfEntry));
     IfEntry.dwIndex = m_dwAdapterIndex;
     if (GetIfEntry(&IfEntry) != NO_ERROR)
+    {
+        /* no IP interface (a disabled adapter has none): keep the status and the name from the enumeration */
+        if (m_Props.pszwName)
+        {
+            pProperties->pszwName = static_cast<PWSTR>(CoTaskMemAlloc((wcslen(m_Props.pszwName) + 1) * sizeof(WCHAR)));
+            if (pProperties->pszwName)
+                wcscpy(pProperties->pszwName, m_Props.pszwName);
+        }
         return NOERROR;
+    }
 
     NormalizeOperStatus(&IfEntry, pProperties);
 
@@ -546,6 +556,108 @@ DupConnectionString(LPCWSTR pszText)
     return pszCopy;
 }
 
+/* The IP helper does not report a disabled adapter, so the connections list built from it loses it, and with
+ * it the "Enable" command. The device manager still knows it (problem code CM_PROB_DISABLED): add one item for
+ * each such network adapter that is not in the list yet. */
+static VOID
+AppendDisabledConnections(PINetConnectionItem *ppHead, PINetConnectionItem pTail)
+{
+    HDEVINFO hInfo;
+    SP_DEVINFO_DATA DevInfo;
+    DWORD dwIndex;
+
+    hInfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_NET, NULL, NULL, DIGCF_PRESENT);
+    if (hInfo == INVALID_HANDLE_VALUE)
+        return;
+
+    for (dwIndex = 0; ; dwIndex++)
+    {
+        ULONG ulStatus = 0, ulProblem = 0;
+        WCHAR szId[64], szName[200], szKey[200];
+        DWORD dwSize, dwType;
+        HKEY hKey;
+        GUID guid;
+        PINetConnectionItem pCheck, pNew;
+        PWSTR pStr = NULL;
+
+        ZeroMemory(&DevInfo, sizeof(DevInfo));
+        DevInfo.cbSize = sizeof(DevInfo);
+        if (!SetupDiEnumDeviceInfo(hInfo, dwIndex, &DevInfo))
+            break;
+        if (CM_Get_DevNode_Status(&ulStatus, &ulProblem, DevInfo.DevInst, 0) != CR_SUCCESS ||
+            !(ulStatus & DN_HAS_PROBLEM) || ulProblem != CM_PROB_DISABLED)
+            continue;
+
+        hKey = SetupDiOpenDevRegKey(hInfo, &DevInfo, DICS_FLAG_GLOBAL, 0, DIREG_DRV, KEY_READ);
+        if (hKey == INVALID_HANDLE_VALUE)
+            continue;
+        dwSize = sizeof(szId);
+        szId[0] = UNICODE_NULL;
+        if (RegQueryValueExW(hKey, L"NetCfgInstanceId", NULL, &dwType, (LPBYTE)szId, &dwSize) != ERROR_SUCCESS ||
+            dwType != REG_SZ)
+        {
+            RegCloseKey(hKey);
+            continue;
+        }
+        RegCloseKey(hKey);
+        szId[_countof(szId) - 1] = UNICODE_NULL;
+        if (FAILED(CLSIDFromString(szId, &guid)))
+            continue;
+
+        for (pCheck = *ppHead; pCheck; pCheck = pCheck->Next)
+            if (IsEqualGUID(pCheck->Props.guidId, guid))
+                break;
+        if (pCheck)
+            continue;   /* already listed */
+
+        pNew = static_cast<PINetConnectionItem>(CoTaskMemAlloc(sizeof(INetConnectionItem)));
+        if (!pNew)
+            break;
+        ZeroMemory(pNew, sizeof(INetConnectionItem));
+        pNew->Props.guidId = guid;
+        pNew->Props.Status = NCS_HARDWARE_DISABLED;
+        pNew->Props.MediaType = NCM_LAN;
+        pNew->Props.dwCharacter |= NCCF_SHOW_ICON;
+
+        /* the name the user gave the connection, as for an active one */
+        if (SUCCEEDED(StringFromCLSID(guid, &pStr)))
+        {
+            if (SUCCEEDED(StringCchPrintfW(szKey, _countof(szKey),
+                                          L"SYSTEM\\CurrentControlSet\\Control\\Network\\"
+                                          L"{4D36E972-E325-11CE-BFC1-08002BE10318}\\%s\\Connection", pStr)) &&
+                RegOpenKeyExW(HKEY_LOCAL_MACHINE, szKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+            {
+                dwSize = sizeof(szName);
+                if (RegQueryValueExW(hKey, L"Name", NULL, &dwType, (LPBYTE)szName, &dwSize) == ERROR_SUCCESS &&
+                    dwType == REG_SZ && szName[0])
+                {
+                    szName[_countof(szName) - 1] = UNICODE_NULL;
+                    pNew->Props.pszwName = DupConnectionString(szName);
+                }
+                RegCloseKey(hKey);
+            }
+            CoTaskMemFree(pStr);
+        }
+
+        szName[0] = UNICODE_NULL;
+        if (!SetupDiGetDeviceRegistryPropertyW(hInfo, &DevInfo, SPDRP_DEVICEDESC, NULL,
+                                               (LPBYTE)szName, sizeof(szName), NULL) || !szName[0])
+            SetupDiGetDeviceRegistryPropertyW(hInfo, &DevInfo, SPDRP_FRIENDLYNAME, NULL,
+                                              (LPBYTE)szName, sizeof(szName), NULL);
+        szName[_countof(szName) - 1] = UNICODE_NULL;
+        pNew->Props.pszwDeviceName = DupConnectionString(szName[0] ? szName : L"Network adapter");
+        if (!pNew->Props.pszwName)
+            pNew->Props.pszwName = DupConnectionString(L"Local Area Connection");
+
+        if (pTail)
+            pTail->Next = pNew;
+        else
+            *ppHead = pNew;
+        pTail = pNew;
+    }
+    SetupDiDestroyDeviceInfoList(hInfo);
+}
+
 HRESULT
 CNetConnectionManager::EnumerateINetConnections()
 {
@@ -570,7 +682,8 @@ CNetConnectionManager::EnumerateINetConnections()
             pAddresses = NULL;
         }
     }
-    if (ret != NO_ERROR)
+    /* no adapter at all is a valid answer: a single disabled adapter is still listed below */
+    if (ret != NO_ERROR && ret != ERROR_NO_DATA)
         return HRESULT_FROM_WIN32(ret);
 
     for (pAdapter = pAddresses; pAdapter != NULL; pAdapter = pAdapter->Next)
@@ -670,6 +783,8 @@ CNetConnectionManager::EnumerateINetConnections()
     }
 
     CoTaskMemFree(pAddresses);
+
+    AppendDisabledConnections(&m_pHead, pCurrent);
 
     m_pCurrent = m_pHead;
     return (m_pHead != NULL ? S_OK : S_FALSE);
