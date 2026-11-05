@@ -4157,7 +4157,13 @@ WSPStringToAddress(IN LPWSTR AddressString,
                     if (lpErrno) *lpErrno = WSAEINVAL;
                     return SOCKET_ERROR;
                 }
-                port = wcstol(*bp, bp, 10);
+                LONG port_part = wcstol(*bp, bp, 10);
+                if (port_part > 65535)
+                {
+                    if (lpErrno) *lpErrno = WSAEINVAL;
+                    return SOCKET_ERROR;
+                }
+                port = (USHORT)port_part;
             }
             else
             {
