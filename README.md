@@ -21,6 +21,7 @@ ci/verify-source.sh                  proves the checkout is the submitted revisi
 ci/export-check.py                   llvm-readobj export dumps, NUMA expectations, diffs
 ci/manifest.py                       manifest.json + SHA256SUMS + step summary
 ci/submit.sh                         agent-side helper: push a revision, dispatch, watch, download
+ci/local-commands.sh                 prints the fast-build steps as a plain local command list (for a workstation build later)
 main                                 CI configuration only
 src/<branch>                         submitted LiberNT source revisions (see below)
 ```
