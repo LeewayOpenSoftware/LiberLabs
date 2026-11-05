@@ -1,0 +1,15 @@
+# LiberX DXC Level 2 fixture set. One case per line:
+#   <name> <profile> <entry> <ok|fail> [extra dxc arguments...]
+# <name>.hlsl lives next to this file. "ok" = must compile to a DXIL container
+# that IDxcValidator accepts and IDxcCompiler3::Disassemble turns into IR text.
+# "fail" = must fail with diagnostics and no object.
+cs60_basic   cs_6_0 main ok
+vs60_basic   vs_6_0 main ok
+ps60_basic   ps_6_0 main ok
+cs60_wave    cs_6_0 main ok
+cs62_16bit   cs_6_2 main ok -enable-16bit-types
+cs65_wave    cs_6_5 main ok
+cs66_dynres  cs_6_6 main ok
+neg_syntax   cs_6_0 main fail
+neg_profile  cs_7_0 main fail
+neg_16bit    cs_6_2 main fail
