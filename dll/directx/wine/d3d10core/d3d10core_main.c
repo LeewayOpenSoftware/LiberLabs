@@ -31,9 +31,25 @@ HRESULT WINAPI DXGID3D10CreateDevice(HMODULE d3d11, IDXGIFactory *factory, IDXGI
 
 HRESULT WINAPI D3D10CoreRegisterLayers(void)
 {
+    HRESULT (WINAPI *register_layers)(void);
+    HMODULE d3d11;
+
     TRACE("\n");
 
-    return E_NOTIMPL;
+    /* The D3D10 device layer is the shared d3d10/d3d11 device; d3d11 registers
+     * it with DXGI through D3D11CoreRegisterLayers - the same entry dxgi calls
+     * lazily from DXGID3D10CreateDevice. d3d10core imports d3d11, so it is
+     * loaded; delegate to it so the layer is really registered. */
+    if (!(d3d11 = GetModuleHandleW(L"d3d11.dll")))
+        d3d11 = LoadLibraryW(L"d3d11.dll");
+    if (!d3d11)
+        return DXGI_ERROR_UNSUPPORTED;
+
+    register_layers = (void *)GetProcAddress(d3d11, "D3D11CoreRegisterLayers");
+    if (!register_layers)
+        return DXGI_ERROR_UNSUPPORTED;
+
+    return register_layers();
 }
 
 HRESULT WINAPI D3D10CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter,
