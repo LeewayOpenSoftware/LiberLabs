@@ -34,7 +34,7 @@
 #include "netcenter.h"
 
 #define CONNECT_TIMEOUT_MS 3000
-#define ICMP_TIMEOUT_MS    1500
+#define ICMP_TIMEOUT_MS    4000
 #define DEFAULT_PROBE_V4   L"1.1.1.1"
 #define DEFAULT_PROBE_V6   L"2606:4700:4700::1111"
 #define DEFAULT_PROBE_PORT 443
@@ -449,28 +449,47 @@ Done:
     return error;
 }
 
-/* ICMP echo to an IPv4 address; returns 0 with the round trip time, else a Win32 error / IP status */
+/* ICMP echo to an IPv4 address, issued exactly as ping.exe does: IcmpSendEcho2, 32 bytes of payload,
+ * TTL 128, a reply buffer sized for the reply structure plus payload and ICMP error data, and a
+ * 4 second wait. Returns 0 with the round trip time, else a Win32 error / IP status. */
+#define PING_PAYLOAD  32
+#define PING_ERROR_DATA 8
+#define PING_STATUS_BLOCK 16
+
+#ifdef _WIN64
+typedef ICMP_ECHO_REPLY32 NC_ECHO_REPLY;
+#else
+typedef ICMP_ECHO_REPLY NC_ECHO_REPLY;
+#endif
+
 static DWORD PingV4(PCWSTR Numeric, DWORD *RoundTrip)
 {
     SOCKADDR_IN address;
     INT length = sizeof(address);
     HANDLE icmp;
-    BYTE data[4] = { 'n', 'c', 's', 'c' };
-    BYTE reply[sizeof(ICMP_ECHO_REPLY) + sizeof(data) + 8 + 64];
-    DWORD count, status;
+    IP_OPTION_INFORMATION options;
+    BYTE data[PING_PAYLOAD];
+    BYTE reply[sizeof(NC_ECHO_REPLY) + PING_PAYLOAD + PING_ERROR_DATA + PING_STATUS_BLOCK];
+    DWORD count, status, i;
 
     RtlZeroMemory(&address, sizeof(address));
     if (WSAStringToAddressW((LPWSTR)Numeric, AF_INET, NULL, (LPSOCKADDR)&address, &length) != 0)
         return ERROR_INVALID_PARAMETER;
+    for (i = 0; i < sizeof(data); i++)
+        data[i] = (BYTE)('a' + (i % ('w' - 'a' + 1)));
+    RtlZeroMemory(&options, sizeof(options));
+    options.Ttl = 128;
+    RtlZeroMemory(reply, sizeof(reply));
     icmp = IcmpCreateFile();
     if (icmp == INVALID_HANDLE_VALUE)
         return GetLastError();
-    count = IcmpSendEcho(icmp, address.sin_addr.S_un.S_addr, data, sizeof(data), NULL, reply, sizeof(reply), ICMP_TIMEOUT_MS);
+    count = IcmpSendEcho2(icmp, NULL, NULL, NULL, address.sin_addr.S_un.S_addr, data, sizeof(data), &options,
+                          reply, sizeof(reply), ICMP_TIMEOUT_MS);
     if (count == 0)
         status = GetLastError();
     else
     {
-        ICMP_ECHO_REPLY *echo = (ICMP_ECHO_REPLY *)reply;
+        NC_ECHO_REPLY *echo = (NC_ECHO_REPLY *)reply;
 
         status = (echo->Status == IP_SUCCESS) ? 0 : echo->Status;
         if (!status && RoundTrip)
