@@ -61,10 +61,12 @@ static void test_xinput_unsupported(void)
         return;
     }
 
-    /* Non-existent controller should fail honestly */
+    /* An out-of-range user index (>= XUSER_MAX_COUNT) is rejected with ERROR_BAD_ARGUMENTS
+     * by Windows xinput1_4 and by dll/win32/xinput1_3/main.c; a valid but absent controller
+     * would be ERROR_DEVICE_NOT_CONNECTED. Both are honest; a fake ERROR_SUCCESS is not. */
     result = get_state(255, &state);
-    check("xinput_invalid_user", result == ERROR_DEVICE_NOT_CONNECTED || result == ERROR_NOT_SUPPORTED,
-            "invalid user: result=%lu", result);
+    check("xinput_invalid_user", result == ERROR_BAD_ARGUMENTS || result == ERROR_DEVICE_NOT_CONNECTED
+            || result == ERROR_NOT_SUPPORTED, "invalid user: result=%lu", result);
 
     FreeLibrary(xinput);
 }
