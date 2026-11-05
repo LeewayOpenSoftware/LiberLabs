@@ -22,6 +22,7 @@ Verb verbs[] = {
     { L"hashfile", hash_file },
     { L"asn", asn_dump },
     { L"decodehex", decode_hex },
+    { L"store", store_verb },
 };
 
 static void print_usage()
@@ -32,9 +33,12 @@ static void print_usage()
     ConPuts(StdOut, L"  -asn                -- Display ASN.1 encoding of a file\n");
     ConPuts(StdOut, L"  -decodehex          -- Decode a hexadecimal-encoded file\n");
     ConPuts(StdOut, L"                         Usage: -decodehex <infile> <outfile>\n");
+    ConPuts(StdOut, L"  -store              -- Enumerate certificates in a store\n");
+    ConPuts(StdOut, L"                         Usage: -store [-user|-enterprise] <StoreName>\n");
     ConPuts(StdOut, L"\n");
     ConPuts(StdOut, L"CertUtil -?           -- Display a list of all verbs\n");
     ConPuts(StdOut, L"CertUtil -hashfile -? -- Display help text for the 'hashfile' verb\n");
+    ConPuts(StdOut, L"CertUtil -store -?    -- Display help text for the 'store' verb\n");
 }
 
 
@@ -79,8 +83,33 @@ EXTERN_C int wmain(int argc, WCHAR *argv[])
 
         if (verb)
         {
-            /* The optional third argument selects the hash algorithm, the
-             * way Windows certutil takes it. */
+            /* Special handling for -store verb which can take 1 or 2 arguments */
+            if (!_wcsicmp(verb->Name, L"store"))
+            {
+                if (argc < 3)
+                {
+                    ConPrintf(StdOut, L"CertUtil: -%s expected at least 1 argument\n", verb->Name);
+                    return EXIT_FAILURE;
+                }
+
+                if (!_wcsicmp(argv[n+1], L"-?"))
+                {
+                    print_usage();
+                    return EXIT_SUCCESS;
+                }
+
+                if (!verb->pfn(argv[n+1], argc > 3 ? argv[n+2] : NULL))
+                {
+                    /* The verb prints the failure */
+                    return EXIT_FAILURE;
+                }
+
+                ConPrintf(StdOut, L"CertUtil: -%s command completed successfully\n", verb->Name);
+                return EXIT_SUCCESS;
+            }
+
+            /* Standard handling for other verbs - the optional third argument selects the hash algorithm,
+             * the way Windows certutil takes it. */
             if (argc != 3 && argc != 4)
             {
                 ConPrintf(StdOut, L"CertUtil: -%s expected 1 or 2 arguments, got %d\n", verb->Name, argc - 2);
