@@ -1,0 +1,203 @@
+name: compat-tests
+# Host-side API/ABI checks at an explicit source revision: builds the system DLLs, then runs
+# forwarder-cycle checks, NUMA export-shape checks and export-table diffs against a baseline run.
+# These are export-table facts measured with llvm-readobj on the runner. They are NOT a LiberNT
+# runtime compatibility claim; runtime behaviour is only ever established on a VM or real hardware.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Source ref in this repo (refs/heads/src/<branch>)"
+        required: true
+        type: string
+      source_sha:
+        description: "Exact 40-hex commit to check"
+        required: true
+        type: string
+      config:
+        description: "Build configuration"
+        required: true
+        default: clang-amd64
+        type: choice
+        options: [clang-amd64, gcc-amd64]
+      dlls:
+        description: "DLL targets to build and dump (space-separated ninja target names)"
+        required: false
+        default: "kernel32 kernelbase ntdll gdi32 dwrite crypt32 schannel secur32 ws2_32 iphlpapi dnsapi wininet"
+        type: string
+      baseline_run_id:
+        description: "Run id of an earlier fast-build/full-build/compat-tests run whose export dumps are the baseline (optional)"
+        required: false
+        default: ""
+        type: string
+      allow_older_revision:
+        description: "Check a commit that is no longer the head of source_ref"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read   # only to download the baseline run's export-dump artifact
+
+concurrency:
+  group: compat-${{ inputs.source_ref }}-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  SOURCE_REF: ${{ inputs.source_ref }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Record start
+        run: echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout CI scripts (main)
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: ci
+          persist-credentials: false
+
+      - name: Checkout submitted source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: src
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Verify source revision
+        run: sh ci/ci/verify-source.sh src "$SOURCE_SHA" "$SOURCE_REF" "${{ inputs.allow_older_revision }}"
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build flex bison ccache wget xz-utils tar python3-mako python3-yaml python3-packaging glslang-tools msitools
+
+      - name: Toolchain pin
+        id: pin
+        run: |
+          . ci/ci/toolchain.env
+          echo "key=rosbe-${{ runner.os }}-$ROSBE_BOOTSTRAP_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Cache RosBE
+        id: cache_rosbe
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/opt/rosbe
+          key: ${{ steps.pin.outputs.key }}
+
+      - name: Install pinned RosBE
+        if: ${{ steps.cache_rosbe.outputs.cache-hit != 'true' }}
+        run: sh ci/ci/install-rosbe.sh
+
+      - name: Restore ccache
+        id: ccache_restore
+        uses: actions/cache/restore@v5
+        with:
+          path: ccache
+          key: ccache-${{ inputs.config }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ inputs.config }}-
+
+      - name: ccache settings
+        run: |
+          echo "CCACHE_BASEDIR=${{ github.workspace }}/src" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=${{ github.workspace }}/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=time_macros" >> "$GITHUB_ENV"
+
+      - name: Configure
+        id: configure
+        working-directory: src
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          . "$GITHUB_WORKSPACE/ci/ci/toolchain.env"
+          compiler=${{ inputs.config }}; arch=${compiler#*-}; compiler=${compiler%%-*}
+          FLAGS=""
+          [ "$compiler" = clang ] && FLAGS="$FLAGS --clang"
+          [ "$compiler" = gcc ] && FLAGS="$FLAGS --gcc"
+          [ "$compiler" = clang ] && [ "$arch" = amd64 ] && FLAGS="$FLAGS -DENABLE_MESA_LLVMPIPE=ON"
+          ./configure.sh $FLAGS -a "$arch" $CMAKE_COMMON_FLAGS 2>&1 | tee ../configure.log
+          ENV_NAME=$([ "$compiler" = clang ] && echo Clang || echo GCC)
+          echo "outdir=output-$ENV_NAME-$arch-debug" >> "$GITHUB_OUTPUT"
+
+      - name: Build submodules and the DLLs under test
+        id: build
+        working-directory: src
+        shell: bash
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          ninja -C ${{ steps.configure.outputs.outdir }} submodules 2>&1 | tee ../submodules.log | tail -n 5
+          set +e
+          ninja -C ${{ steps.configure.outputs.outdir }} -k0 ${{ inputs.dlls }} 2>&1 | tee ../build.log | tail -n 40
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit $rc
+
+      - name: Forwarder-cycle check (host-side)
+        if: always()
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          timeout 600 python3 -u src/sdk/tools/check-forwarder-loops.py src/${{ steps.configure.outputs.outdir }} 2>&1 | tee out-forwarders.log
+          echo "### Forwarder cycles: exit ${PIPESTATUS[0]} (host-side export-table check)" >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+      - name: NUMA export-shape check (host-side)
+        if: always()
+        shell: bash
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          set +e
+          python3 ci/ci/export-check.py numa src/${{ steps.configure.outputs.outdir }} 2>&1 | tee out-numa.log
+          rc=${PIPESTATUS[0]}
+          echo "### NUMA exports: $(tail -n 1 out-numa.log)" >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - name: Export dumps (current)
+        if: always()
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          python3 ci/ci/export-check.py dump src/${{ steps.configure.outputs.outdir }} out/exports $(for t in ${{ inputs.dlls }}; do echo "$t.dll"; done)
+
+      - name: Export diff against baseline run
+        if: ${{ always() && inputs.baseline_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p baseline
+          gh run download "${{ inputs.baseline_run_id }}" -R "$GITHUB_REPOSITORY" -D baseline || true
+          base=$(find baseline -type d -name exports | head -n1)
+          if [ -z "$base" ]; then echo "baseline run has no exports/ dump" | tee out-diff.log; exit 0; fi
+          python3 ci/ci/export-check.py diff "$base" out/exports 2>&1 | tee out-diff.log
+          { echo "### Export diff vs run ${{ inputs.baseline_run_id }} (host-side)"; echo '```'; head -n 200 out-diff.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Manifest
+        if: always()
+        run: |
+          python3 ci/ci/manifest.py --out out --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+            --config "${{ inputs.config }}" --status "${{ steps.build.outcome }}" --started "$STARTED" \
+            --log build.log --targets "${{ inputs.dlls }}" --toolchain-env ci/ci/toolchain.env
+          cp -f out-*.log configure.log build.log out/ 2>/dev/null || true
+          echo "" >> "$GITHUB_STEP_SUMMARY"; echo "_All results above are host-side export-table checks; none is a LiberNT runtime compatibility claim._" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save ccache
+        if: ${{ always() && steps.ccache_restore.outcome == 'success' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compat-${{ inputs.config }}-${{ inputs.source_sha }}
+          path: out/
+          retention-days: 14

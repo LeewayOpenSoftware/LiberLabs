@@ -1,0 +1,234 @@
+name: full-build
+# Complete LiberNT build at an explicit source revision: all targets, images, manifest, checksums.
+# Manual dispatch only. Minutes are the scarce resource: one full build is ~30-45 min with a warm
+# ccache and ~60-100 min cold on a 4-vCPU runner (measured on the public LiberNT Build workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Source ref in this repo (refs/heads/src/<branch>)"
+        required: true
+        type: string
+      source_sha:
+        description: "Exact 40-hex commit to build"
+        required: true
+        type: string
+      config:
+        description: "Build configuration"
+        required: true
+        default: clang-amd64
+        type: choice
+        options: [clang-amd64, gcc-amd64, clang-i386, clang-arm64]
+      images:
+        description: "Images to produce after the full build"
+        required: true
+        default: bootcd
+        type: choice
+        options: [none, bootcd, bootcd+livecd, bootcd+img+vhd]
+      retention_days:
+        description: "Artifact retention (7-14). Images are large: a 450 MB ISO uses most of a free plan's 500 MB artifact storage"
+        required: false
+        default: "7"
+        type: string
+      extra_cmake:
+        description: "Extra -D flags for configure (optional)"
+        required: false
+        default: ""
+        type: string
+      allow_older_revision:
+        description: "Build a commit that is no longer the head of source_ref"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-${{ inputs.config }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  SOURCE_REF: ${{ inputs.source_ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Record start
+        run: echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/lib/jvm /usr/local/share/powershell /usr/local/share/chromium
+          sudo docker system prune --all --force
+          df -h /
+
+      - name: Checkout CI scripts (main)
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: ci
+          persist-credentials: false
+
+      - name: Checkout submitted source revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: src
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Verify source revision
+        run: sh ci/ci/verify-source.sh src "$SOURCE_SHA" "$SOURCE_REF" "${{ inputs.allow_older_revision }}"
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build flex bison ccache wget xz-utils tar python3-mako python3-yaml python3-packaging glslang-tools msitools
+
+      - name: Toolchain pin
+        id: pin
+        run: |
+          . ci/ci/toolchain.env
+          echo "key=rosbe-${{ runner.os }}-$ROSBE_BOOTSTRAP_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Cache RosBE
+        id: cache_rosbe
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/opt/rosbe
+          key: ${{ steps.pin.outputs.key }}
+
+      - name: Install pinned RosBE
+        if: ${{ steps.cache_rosbe.outputs.cache-hit != 'true' }}
+        run: sh ci/ci/install-rosbe.sh
+
+      - name: Restore ccache
+        id: ccache_restore
+        uses: actions/cache/restore@v5
+        with:
+          path: ccache
+          key: ccache-${{ inputs.config }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ inputs.config }}-
+
+      - name: ccache settings
+        run: |
+          echo "CCACHE_BASEDIR=${{ github.workspace }}/src" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=${{ github.workspace }}/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=time_macros" >> "$GITHUB_ENV"
+
+      - name: Configure
+        id: configure
+        working-directory: src
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          . "$GITHUB_WORKSPACE/ci/ci/toolchain.env"
+          compiler=${{ inputs.config }}; arch=${compiler#*-}; compiler=${compiler%%-*}
+          FLAGS=""
+          [ "$compiler" = clang ] && FLAGS="$FLAGS --clang"
+          [ "$compiler" = gcc ] && FLAGS="$FLAGS --gcc"
+          [ "$compiler" = clang ] && [ "$arch" = amd64 ] && FLAGS="$FLAGS -DENABLE_MESA_LLVMPIPE=ON"
+          ./configure.sh $FLAGS -a "$arch" $CMAKE_COMMON_FLAGS ${{ inputs.extra_cmake }} 2>&1 | tee ../configure.log
+          ENV_NAME=$([ "$compiler" = clang ] && echo Clang || echo GCC)
+          echo "outdir=output-$ENV_NAME-$arch-debug" >> "$GITHUB_OUTPUT"
+
+      - name: Build submodules
+        working-directory: src
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          ninja -C ${{ steps.configure.outputs.outdir }} submodules 2>&1 | tee ../submodules.log
+
+      - name: Full build (all targets, keep going)
+        id: build
+        working-directory: src
+        shell: bash
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          set +e
+          ninja -C ${{ steps.configure.outputs.outdir }} -k0 2>&1 | tee ../build.log | grep -E "^\[[0-9]+/[0-9]+\]|FAILED|error:" | awk 'NR%200==0 || /FAILED|error:/'
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          tail -n 50 ../build.log
+          exit $rc
+
+      - name: Images
+        id: images
+        if: ${{ inputs.images != 'none' }}
+        working-directory: src
+        shell: bash
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          case "${{ inputs.images }}" in
+            bootcd) T="bootcd" ;;
+            bootcd+livecd) T="bootcd livecd" ;;
+            bootcd+img+vhd) T="bootcd liberntimg liberntvhd" ;;
+          esac
+          ninja -C ${{ steps.configure.outputs.outdir }} -k0 $T 2>&1 | tee ../images.log | tail -n 30
+          mkdir -p ../out/images
+          for f in bootcd.iso livecd.iso LiberNT.img LiberNT.vhd LiberNT.vhdx; do
+            [ -f "${{ steps.configure.outputs.outdir }}/$f" ] && cp -v "${{ steps.configure.outputs.outdir }}/$f" ../out/images/
+          done
+          ls -l ../out/images || true
+
+      - name: Dependency and forwarder-loop checks
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          python3 src/sdk/tools/depcheck.py src/${{ steps.configure.outputs.outdir }} --mode depfiles --nested --fail-on-gaps
+          timeout 600 python3 -u src/sdk/tools/check-forwarder-loops.py src/${{ steps.configure.outputs.outdir }}
+
+      - name: Export dumps of the system DLLs (host-side)
+        if: always()
+        run: |
+          . "$HOME/.local/opt/rosbe/rosbe-env.sh"
+          python3 ci/ci/export-check.py dump src/${{ steps.configure.outputs.outdir }} out/exports || true
+
+      - name: Manifest and checksums
+        if: always()
+        run: |
+          python3 ci/ci/manifest.py --out out --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+            --config "${{ inputs.config }}" --status "${{ steps.build.outcome }}" --started "$STARTED" \
+            --log build.log --targets "all ${{ inputs.images }}" --toolchain-env ci/ci/toolchain.env \
+            $(for f in out/images/*; do [ -f "$f" ] && echo "--artifact $f"; done)
+          cp -f configure.log submodules.log build.log images.log out/ 2>/dev/null || true
+          gzip -f out/build.log
+
+      - name: Print ccache statistics
+        if: ${{ always() && steps.ccache_restore.outcome == 'success' }}
+        run: ccache -s
+
+      - name: Save ccache
+        if: ${{ always() && steps.ccache_restore.outcome == 'success' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ccache
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+
+      - name: Upload manifest, logs and export dumps
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-${{ inputs.config }}-${{ inputs.source_sha }}-manifest
+          path: |
+            out/manifest.json
+            out/SHA256SUMS
+            out/*.log
+            out/*.log.gz
+            out/exports/
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Upload images (private artifact)
+        if: ${{ inputs.images != 'none' && steps.images.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-${{ inputs.config }}-${{ inputs.source_sha }}-images
+          path: out/images/
+          retention-days: ${{ inputs.retention_days }}
+          compression-level: 0
