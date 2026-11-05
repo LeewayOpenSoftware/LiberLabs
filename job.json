@@ -1,0 +1,36 @@
+{
+  "job": "S1b-schannel-gate",
+  "description": "Schannel S1 gate, second round. Fixes the three blockers of the Lab03 S1 run (shared/libernt/network-research/S1-GATE-RESULT-1809.json) without depending on DNS: the gate connects by IP, the test certificate now has SAN IP:10.0.2.15 and DNS:tlspoc.local, crypt32 matches an IP literal server name against iPAddress entries, the server has its own log, and CertCreateChainEngine is registered with START_TEST. No ignore flags.",
+  "base": "36a28891bae00c5eb16b4d25cd6da016b391a4fc (prerequisite)",
+  "sha": "9384deab13780d5db67e97e17e6153f5a3d903fc",
+  "ref_in_bundle": "refs/heads/leeway/schannel-s1",
+  "bundle": {"file": "schannel-s1.bundle", "base64": "bundle.b64", "sha256": "221fe90a9b44390f7f9be8b5f0415cdc662a793baef66fbfada322fee5909335", "commits": 11, "prerequisite": "36a28891bae"},
+  "new_commits_since_S1": [
+    "3e8139c14b [CRYPT32_APITEST] Define the CertCreateChainEngine test with START_TEST (blocker 3: the test was hand-written as func_CertCreateChainEngine, so the apitest harness did not list it)",
+    "9384deab13 [CRYPT32] Match an IP literal server name against the iPAddress alternative names (the SSL policy only compared dNSName entries, so by-IP with an IP SAN would still give CERT_E_CN_NO_MATCH = 12157 and the gate could not discriminate)"
+  ],
+  "build": {
+    "targets": ["crypt32", "schannel", "crypt32_apitest", "schannel_winetest"],
+    "config": "LiberNT CI amd64 clang config with ROSTESTS for the test targets",
+    "syntax_check": "-fsyntax-only with the real amd64-debug flags: crypt32 chain.c rc 0 0 warnings; CertCreateChainEngine.c with the crypt32 flags + apitest include dir rc 0. Compiled by syntax only; not built or run by me."
+  },
+  "tools": {
+    "dir": "tools/",
+    "rebuilt": "s0probe.exe and s0server.exe rebuilt (RosBE llvm-mingw clang, host tools, never run by me) from tools/src with the new tlspoc_testcert.h; s0winhttp.exe unchanged (sha256 f4d58bb5). sha256 in SHA256SUMS.",
+    "certificate": "tools/src/tlspoc_testcert.h: self-signed, CN=tlspoc.local, SAN DNS:tlspoc.local + IP:10.0.2.15, EKU serverAuth, basicConstraints CA:TRUE, keyUsage digitalSignature/keyEncipherment/keyCertSign, RSA-2048, validity 2026-01-01..2036-01-01 (notBefore early so the guest clock cannot make it not-yet-valid). Test-only key. s0probe installs this exact certificate into ROOT.",
+    "gate": "tools/gate.cmd: census, install into ROOT, server with its own log (s0server.log, never appended to the result file), R3a WinHTTP by 10.0.2.15 (must be 200), R3b control by 127.0.0.1 (not in the SAN, expect 12157), apitest CertCreateChainEngine and CertOpenSystemStore by name, schannel_winetest, server log dumped after the server is stopped. No hosts entry (the hosts file is not honoured by the resolver, separate bug)."
+  },
+  "vm": {
+    "mode": "OFFLINE guest; server inside the guest on 0.0.0.0:4443; writable payload disk as D: as in the Lab03 S1 run; crypt32.dll and schannel.dll copied into system32 (originals kept as .old) AND on the payload, as before",
+    "settings": "shared/libernt/liberlabs/vm/LAB01-VM-SETTINGS.md (or the Lab03 equivalent)"
+  },
+  "pass": [
+    "R3a: 'SUCCESS http status=200' by 10.0.2.15 with no ignore flags",
+    "R3b: 12157 by 127.0.0.1 (control, shows the name check is active; a 200 here would be a name-check hole)",
+    "crypt32_apitest CertCreateChainEngine runs (not 'does not exist') with 0 failures; CertOpenSystemStore 232 tests 0 failures as before",
+    "schannel_winetest 36 tests 0 failures (baseline)",
+    "no bugcheck, clean shutdown"
+  ],
+  "if_R3a_fails": "report gle and the s0server log line. 'handshake ok' on the server with 12157 on the client then means a real trust or policy fault: report which (use the S0WINHTTP SECURE_FAILURE callback if it fires, the s0probe ROOT count after install, and run crypt32_apitest CertCreateChainEngine whose exclusive-root rows pin trust and SSL policy). Do not add ignore flags and do not widen trust.",
+  "report_back": "s1-result.txt in full, s0server.log, crypt32.dll/schannel.dll/crypt32_apitest.exe sha256, comparison with the Lab03 S1 run"
+}
