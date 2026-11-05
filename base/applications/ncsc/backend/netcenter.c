@@ -203,8 +203,19 @@ static VOID CopyAdapter(NC_ADAPTER *Out, const IP_ADAPTER_ADDRESSES *In)
     index = Out->IfIndex;
     RtlZeroMemory(&row, sizeof(row));
     row.InterfaceIndex = index;
+    switch (In->OperStatus)
+    {
+        case IfOperStatusUp: Out->Link = NC_LINK_CONNECTED; break;
+        case IfOperStatusNotPresent: Out->Link = NC_LINK_NOT_PRESENT; break;
+        case IfOperStatusLowerLayerDown: Out->Link = NC_LINK_LOWER_DOWN; break;
+        case IfOperStatusDown: Out->Link = NC_LINK_DOWN; break;
+        default: Out->Link = NC_LINK_UNKNOWN; break;
+    }
     if (index && GetIfEntry2(&row) == NO_ERROR)
     {
+        /* only a media report of "disconnected" makes a down interface an unplugged one */
+        if (Out->Link == NC_LINK_DOWN && row.MediaConnectState == MediaConnectStateDisconnected)
+            Out->Link = NC_LINK_UNPLUGGED;
         Out->HasStatistics = TRUE;
         Out->InOctets = row.InOctets;
         Out->OutOctets = row.OutOctets;
@@ -512,6 +523,7 @@ ULONG NcAdapterSignature(const NC_ADAPTER_LIST *List)
             continue;
         MIX(a->IfIndex);
         MIX(a->IsUp);
+        MIX(a->Link);
         for (j = 0; j < a->AddressCount; j++)
             for (k = 0; a->Addresses[j].Text[k]; k++)
                 MIX(a->Addresses[j].Text[k]);
@@ -679,6 +691,7 @@ static PCWSTR ToolFile(NC_TOOL Tool)
         case NC_TOOL_CONNECTIONS: return L"ncpa.cpl";
         case NC_TOOL_INTERNET_OPTIONS: return L"inetcpl.cpl";
         case NC_TOOL_FIREWALL: return L"firewall.cpl";
+        case NC_TOOL_IPCONFIG: return L"ipconfig.exe";
         default: return NULL;
     }
 }
@@ -711,6 +724,11 @@ BOOL NcLaunchTool(HWND Owner, NC_TOOL Tool)
         result = (INT_PTR)ShellExecuteW(Owner, L"open", L"explorer.exe",
                                         L"/n,::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\::{21EC2020-3AEA-1069-A2DD-08002B30309D}\\::{7007ACC7-3202-11D1-AAD2-00805FC1270E}",
                                         NULL, SW_SHOWNORMAL);
+    }
+    else if (Tool == NC_TOOL_IPCONFIG)
+    {
+        /* /k keeps the window open so the output can be read */
+        result = (INT_PTR)ShellExecuteW(Owner, L"open", L"cmd.exe", L"/k ipconfig /all", NULL, SW_SHOWNORMAL);
     }
     else
         result = (INT_PTR)ShellExecuteW(Owner, L"open", L"control.exe", ToolFile(Tool), NULL, SW_SHOWNORMAL);
@@ -766,7 +784,23 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
         if (up)
             SetStep(Report, 0, L"Network interfaces", NC_DIAG_PASS, L"%lu of %lu interface(s) are connected.", up, list->Count);
         else
-            SetStep(Report, 0, L"Network interfaces", NC_DIAG_FAIL, L"%lu interface(s) found, none is connected.", list->Count);
+        {
+            PCWSTR why = L"";
+            ULONG k;
+
+            for (k = 0; k < list->Count; k++)
+            {
+                if (!list->Adapters[k].IsLoopback)
+                {
+                    why = NcLinkText(list->Adapters[k].Link);
+                    break;
+                }
+            }
+            if (why[0])
+                SetStep(Report, 0, L"Network interfaces", NC_DIAG_FAIL, L"None of the %lu interface(s) is connected (first adapter: %s).", list->Count, why);
+            else
+                SetStep(Report, 0, L"Network interfaces", NC_DIAG_FAIL, L"%lu interface(s) found, none is connected.", list->Count);
+        }
     }
     interfacesOk = (up != 0);
     DONE();
@@ -995,6 +1029,19 @@ PCWSTR NcDiagResultText(NC_DIAG_RESULT Result)
         case NC_DIAG_WARN: return L"INCONCLUSIVE";
         case NC_DIAG_UNSUPPORTED: return L"NOT SUPPORTED";
         default: return L"SKIPPED";
+    }
+}
+
+PCWSTR NcLinkText(NC_LINK Link)
+{
+    switch (Link)
+    {
+        case NC_LINK_CONNECTED: return L"Connected";
+        case NC_LINK_UNPLUGGED: return L"Network cable unplugged";
+        case NC_LINK_DOWN: return L"Disabled or not operational";
+        case NC_LINK_NOT_PRESENT: return L"Hardware not present";
+        case NC_LINK_LOWER_DOWN: return L"Lower layer down";
+        default: return L"Status unknown";
     }
 }
 

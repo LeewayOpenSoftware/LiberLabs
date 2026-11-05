@@ -39,6 +39,17 @@ typedef enum _NC_LEVEL
     NC_LEVEL_INTERNET     /* a connection to the probe host was made */
 } NC_LEVEL;
 
+/* Link state of an adapter, from the operational status and the media connect state of the stack */
+typedef enum _NC_LINK
+{
+    NC_LINK_UNKNOWN = 0,
+    NC_LINK_CONNECTED,   /* operational */
+    NC_LINK_UNPLUGGED,   /* not operational and the media reports no link (cable unplugged) */
+    NC_LINK_DOWN,        /* not operational, no media information: disabled or failed */
+    NC_LINK_NOT_PRESENT, /* the hardware is gone */
+    NC_LINK_LOWER_DOWN   /* an interface below this one is down */
+} NC_LINK;
+
 typedef struct _NC_IPADDR
 {
     WCHAR Text[NC_TEXT];
@@ -60,6 +71,7 @@ typedef struct _NC_ADAPTER
     ULONG64 TransmitLinkSpeed;      /* bits per second, 0 when unknown */
     ULONG64 ReceiveLinkSpeed;
     BOOL IsUp;                      /* IfOperStatusUp */
+    NC_LINK Link;
     BOOL IsLoopback;
     NC_STATE Dhcp4;                 /* NC_UNAVAILABLE when the stack does not say */
     NC_STATE Dhcp6;
@@ -115,6 +127,7 @@ typedef enum _NC_TOOL
     NC_TOOL_CONNECTIONS = 0, /* Network Connections folder */
     NC_TOOL_INTERNET_OPTIONS,
     NC_TOOL_FIREWALL,
+    NC_TOOL_IPCONFIG,        /* ipconfig /all in a console window */
     NC_TOOL_COUNT
 } NC_TOOL;
 
@@ -176,6 +189,7 @@ VOID NcFormatMac(const NC_ADAPTER *Adapter, WCHAR *Text, UINT Count);
 VOID NcFormatSpeed(ULONG64 BitsPerSecond, WCHAR *Text, UINT Count);
 PCWSTR NcDiagResultText(NC_DIAG_RESULT Result);
 PCWSTR NcLevelText(NC_LEVEL Level);
+PCWSTR NcLinkText(NC_LINK Link);
 
 #ifdef __cplusplus
 }

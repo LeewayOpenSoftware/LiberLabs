@@ -43,6 +43,7 @@ enum LinkAction
     LA_INTERNET_OPTIONS,
     LA_FIREWALL,
     LA_STATUS,      /* arg: adapter index */
+    LA_IPCONFIG,
     LA_PROPERTIES   /* arg: adapter index */
 };
 
@@ -372,7 +373,12 @@ static VOID PaintLeft(HDC hdc, int height)
     AddLink(hdc, 16, y, L"Manage network connections", LA_CONNECTIONS, 0, conn); y += lh;
     AddLink(hdc, 16, y, L"Change adapter settings", LA_CONNECTIONS, 0, conn); y += lh;
     AddLink(hdc, 16, y, L"Diagnose and repair", LA_DIAGNOSE, 0, TRUE); y += lh;
-    AddLink(hdc, 16, y, L"Refresh now", LA_REFRESH, 0, TRUE); y += lh + 10;
+    AddLink(hdc, 16, y, L"Refresh now", LA_REFRESH, 0, TRUE); y += lh;
+    {
+        BOOL ipc = NcToolAvailable(NC_TOOL_IPCONFIG);
+
+        AddLink(hdc, 16, y, L"Show IP configuration", LA_IPCONFIG, 0, ipc); if (!ipc) Text(hdc, g_FontSmall, COLOR_GRAY, 20, y + lh - 6, L"not installed"); y += lh + (ipc ? 10 : 18);
+    }
     Text(hdc, g_FontBold, COLOR_TITLE, 16, y, L"See also"); y += lh;
     AddLink(hdc, 16, y, L"Internet Options", LA_INTERNET_OPTIONS, 0, inet); if (!inet) Text(hdc, g_FontSmall, COLOR_GRAY, 20, y + lh - 6, L"not installed"); y += lh + (inet ? 0 : 8);
     AddLink(hdc, 16, y, L"Windows Firewall", LA_FIREWALL, 0, fw); if (!fw) Text(hdc, g_FontSmall, COLOR_GRAY, 20, y + lh - 6, L"not installed"); y += lh + (fw ? 0 : 8);
@@ -473,6 +479,28 @@ static int PaintContent(HDC hdc, int x0, int width)
     if (g_List && !any)
     {
         Text(hdc, g_FontNormal, COLOR_BAD, x + 12, y, L"No network adapter is connected."); y += lh;
+    }
+    /* adapters that exist but are not connected, each with the state the stack reports */
+    {
+        BOOL header = FALSE;
+
+        for (i = 0; g_List && i < g_List->Count; i++)
+        {
+            const NC_ADAPTER *a = &g_List->Adapters[i];
+
+            if (a->IsUp || a->IsLoopback)
+                continue;
+            if (!header)
+            {
+                y += 8;
+                Text(hdc, g_FontBold, COLOR_TITLE, x, y, L"Adapters that are not connected"); y += lh + 4;
+                header = TRUE;
+            }
+            Text(hdc, g_FontNormal, 0, x + 12, y, a->Name);
+            Text(hdc, g_FontNormal, COLOR_BAD, x + 260, y, NcLinkText(a->Link));
+            AddLink(hdc, x + 480, y, L"View status", LA_STATUS, (int)i, TRUE);
+            y += lh;
+        }
     }
     y += 8;
     if (g_ProbeDone)
@@ -595,7 +623,7 @@ static VOID FormatAdapterDetails(const NC_ADAPTER *a, WCHAR *out, UINT count)
     NcFormatSpeed(a->ReceiveLinkSpeed, speed2, ARRAYSIZE(speed2));
     out[0] = UNICODE_NULL;
 #define ADD(...) do { StringCchPrintfW(line, ARRAYSIZE(line), __VA_ARGS__); StringCchCatW(out, count, line); } while (0)
-    ADD(L"Connection:\t\t%s\r\nDescription:\t\t%s\r\nPhysical address:\t%s\r\nStatus:\t\t\t%s\r\n", a->Name, a->Description, mac, a->IsUp ? L"Connected" : L"Disconnected");
+    ADD(L"Connection:\t\t%s\r\nDescription:\t\t%s\r\nPhysical address:\t%s\r\nStatus:\t\t\t%s\r\n", a->Name, a->Description, mac, NcLinkText(a->Link));
     ADD(L"Speed (send/receive):\t%s / %s\r\nMTU:\t\t\t%lu\r\n", speed, speed2, a->Mtu);
     ADD(L"DHCP enabled (IPv4):\t%s\r\n", a->Dhcp4 == NC_ON ? L"Yes" : (a->Dhcp4 == NC_OFF ? L"No" : L"Unknown"));
     if (a->DhcpServer[0])
@@ -721,6 +749,10 @@ static VOID DoLink(HWND hwnd, const LINK *link)
         case LA_FIREWALL:
             if (!NcLaunchTool(hwnd, NC_TOOL_FIREWALL))
                 Failed(hwnd, L"The firewall settings could not be opened.");
+            break;
+        case LA_IPCONFIG:
+            if (!NcLaunchTool(hwnd, NC_TOOL_IPCONFIG))
+                Failed(hwnd, L"ipconfig could not be started.");
             break;
         case LA_DIAGNOSE:
             RunDiagnosticsWindow(hwnd);
