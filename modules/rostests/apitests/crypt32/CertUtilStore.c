@@ -239,14 +239,14 @@ static void test_store_permissions(void)
     HCERTSTORE hStoreUser = NULL;
 
     /* LocalMachine system stores should be readable */
-    hStoreLocal = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStoreLocal = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                                CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
     ok(hStoreLocal != NULL, "Failed to open LocalMachine Root store\n");
     if (hStoreLocal)
         CertCloseStore(hStoreLocal, 0);
 
     /* CurrentUser system stores should be readable */
-    hStoreUser = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStoreUser = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                               CERT_SYSTEM_STORE_CURRENT_USER, L"My");
     ok(hStoreUser != NULL, "Failed to open CurrentUser My store\n");
     if (hStoreUser)
@@ -263,7 +263,7 @@ static void test_common_store_names(void)
 
     for (i = 0; i < sizeof(storeNames)/sizeof(storeNames[0]); i++)
     {
-        HCERTSTORE hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+        HCERTSTORE hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                                          CERT_SYSTEM_STORE_LOCAL_MACHINE, storeNames[i]);
         ok(hStore != NULL, "Failed to open '%ls' store\n", storeNames[i]);
         if (hStore)

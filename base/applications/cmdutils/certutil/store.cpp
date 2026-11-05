@@ -42,14 +42,14 @@ BOOL enumerate_store(HCERTSTORE hStore, LPCWSTR StoreName, LPCWSTR LocationStrin
         FileTimeToSystemTime(&ftLocal, &stBefore);
         GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &stBefore, NULL,
                       szDateBefore, sizeof(szDateBefore)/sizeof(WCHAR));
-        GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_FORCE24HOURFORMAT, &stBefore, NULL,
+        GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &stBefore, NULL,
                       szTimeBefore, sizeof(szTimeBefore)/sizeof(WCHAR));
 
         FileTimeToLocalFileTime(&pCertContext->pCertInfo->NotAfter, &ftLocal);
         FileTimeToSystemTime(&ftLocal, &stAfter);
         GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &stAfter, NULL,
                       szDateAfter, sizeof(szDateAfter)/sizeof(WCHAR));
-        GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_FORCE24HOURFORMAT, &stAfter, NULL,
+        GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &stAfter, NULL,
                       szTimeAfter, sizeof(szTimeAfter)/sizeof(WCHAR));
 
         /* Print Windows-format certificate info */
@@ -99,7 +99,7 @@ BOOL store_verb(LPCWSTR Argument1, LPCWSTR Argument2)
         }
         else if (!_wcsicmp(Argument1, L"-enterprise"))
         {
-            /* -enterprise is LocalMachine (default), just with explicit flag */
+            dwFlags = CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE | CERT_STORE_READONLY_FLAG | CERT_STORE_OPEN_EXISTING_FLAG;
             StoreName = Argument2;
             LocationString = L"LocalMachine";
         }
@@ -134,9 +134,6 @@ BOOL store_verb(LPCWSTR Argument1, LPCWSTR Argument2)
 
     /* Close the store */
     CertCloseStore(hStore, 0);
-
-    if (result)
-        ConPuts(StdOut, L"CertUtil: -store command completed successfully\n");
 
     return result;
 }
