@@ -6,6 +6,7 @@ extern void func_CertControlStore(void);
 extern void func_CertEnumSystemStoreLocation(void);
 extern void func_CertOpenSystemStore(void);
 extern void func_CertUpdateStore(void);
+extern void func_CertUtilStore(void);
 extern void func_CryptProtectMemory(void);
 
 const struct test winetest_testlist[] =
@@ -14,6 +15,7 @@ const struct test winetest_testlist[] =
     { "CertEnumSystemStoreLocation", func_CertEnumSystemStoreLocation },
     { "CertOpenSystemStore", func_CertOpenSystemStore },
     { "CertUpdateStore", func_CertUpdateStore },
+    { "CertUtilStore", func_CertUtilStore },
     { "CryptProtectMemory", func_CryptProtectMemory },
 
     { 0, 0 }
