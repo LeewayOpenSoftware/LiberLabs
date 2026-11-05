@@ -144,9 +144,12 @@ static void test_hittestpoint_ligatures(IDWriteFactory *factory)
 {
     IDWriteTextFormat *format;
     IDWriteTextLayout *layout;
+    DWRITE_CLUSTER_METRICS clusters[16];
     DWRITE_HIT_TEST_METRICS metrics;
     BOOL is_trailing, is_inside;
     const WCHAR text[] = L"fi fl ff ffi";
+    UINT32 count = 0, i, lig = ~0u, text_pos = 0;
+    FLOAT x = 0.0f;
     HRESULT hr;
 
     hr = IDWriteFactory_CreateTextFormat(factory, L"Calibri", NULL, DWRITE_FONT_WEIGHT_NORMAL,
@@ -163,9 +166,32 @@ static void test_hittestpoint_ligatures(IDWriteFactory *factory)
         return;
     }
 
-    hr = IDWriteTextLayout_HitTestPoint(layout, 10.0f, 5.0f, &is_trailing, &is_inside, &metrics);
-    check("hittestpoint_ligatures", SUCCEEDED(hr) && is_inside && metrics.length >= 2,
-            "ligature cluster: hr=%lx pos=%u len=%u", hr, metrics.textPosition, metrics.length);
+    /* Find the first cluster the shaper made out of more than one character (a formed
+     * ligature). Whether one forms depends on the font the layout resolved to; without one
+     * there is nothing to hit-test, so the case is a SKIP, not a verdict on HitTestPoint. */
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, ARRAY_SIZE(clusters), &count);
+    if (FAILED(hr) || count == 0 || count > ARRAY_SIZE(clusters)) {
+        report("hittestpoint_ligatures", "SKIP", "GetClusterMetrics hr=%lx count=%u", hr, count);
+        IDWriteTextLayout_Release(layout);
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        if (clusters[i].length >= 2) { lig = i; break; }
+        x += clusters[i].width;
+        text_pos += clusters[i].length;
+    }
+    if (lig == ~0u) {
+        report("hittestpoint_ligatures", "SKIP", "no ligature formed (%u clusters of 1 char each)", count);
+        IDWriteTextLayout_Release(layout);
+        return;
+    }
+
+    /* Hit the middle of that cluster: the metrics must cover the whole cluster. */
+    hr = IDWriteTextLayout_HitTestPoint(layout, x + clusters[lig].width / 2.0f, 5.0f, &is_trailing, &is_inside, &metrics);
+    check("hittestpoint_ligatures", SUCCEEDED(hr) && is_inside && metrics.textPosition == text_pos
+            && metrics.length == clusters[lig].length,
+            "ligature cluster %u (text %u len %u, x %.1f): hr=%lx pos=%u len=%u", lig, text_pos,
+            clusters[lig].length, x + clusters[lig].width / 2.0f, hr, metrics.textPosition, metrics.length);
 
     IDWriteTextLayout_Release(layout);
 }
