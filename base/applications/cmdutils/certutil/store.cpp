@@ -121,7 +121,7 @@ BOOL store_verb(LPCWSTR Argument1, LPCWSTR Argument2)
     }
 
     /* Open the certificate store (read-only, must exist) */
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL, dwFlags, StoreName);
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, dwFlags, StoreName);
     if (!hStore)
     {
         DWORD dwErr = GetLastError();

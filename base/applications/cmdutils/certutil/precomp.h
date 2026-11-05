@@ -7,6 +7,7 @@
 #include <windef.h>
 #include <winbase.h>
 #include <strsafe.h>
+#include <winnls.h>
 
 #include <conutils.h>
 

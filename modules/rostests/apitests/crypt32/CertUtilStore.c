@@ -23,7 +23,7 @@ static void test_enumerate_root_store(void)
     PCCERT_CONTEXT pCert = NULL;
     int certCount = 0;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
     ok(hStore != NULL, "Failed to open Root store\n");
     if (!hStore)
@@ -50,7 +50,7 @@ static void test_enumerate_authroot_store(void)
     PCCERT_CONTEXT pCert = NULL;
     int certCount = 0;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_LOCAL_MACHINE, L"AuthRoot");
     ok(hStore != NULL, "Failed to open AuthRoot store\n");
     if (!hStore)
@@ -73,7 +73,7 @@ static void test_enumerate_current_user_store(void)
     HCERTSTORE hStore = NULL;
     PCCERT_CONTEXT pCert = NULL;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_CURRENT_USER, L"My");
     ok(hStore != NULL, "Failed to open CurrentUser My store\n");
     if (!hStore)
@@ -98,7 +98,7 @@ static void test_certificate_dates(void)
     PCCERT_CONTEXT pCert = NULL;
     BOOL foundDateCert = FALSE;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
     ok(hStore != NULL, "Failed to open Root store\n");
     if (!hStore)
@@ -136,7 +136,7 @@ static void test_certificate_thumbprint(void)
     PCCERT_CONTEXT pCert = NULL;
     BOOL foundThumbprintCert = FALSE;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
     ok(hStore != NULL, "Failed to open Root store\n");
     if (!hStore)
@@ -169,7 +169,7 @@ static void test_certificate_serial(void)
     PCCERT_CONTEXT pCert = NULL;
     BOOL foundSerialCert = FALSE;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
     ok(hStore != NULL, "Failed to open Root store\n");
     if (!hStore)
@@ -200,7 +200,7 @@ static void test_certificate_names(void)
     PCCERT_CONTEXT pCert = NULL;
     BOOL foundNameCert = FALSE;
 
-    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL,
+    hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
                           CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
     ok(hStore != NULL, "Failed to open Root store\n");
     if (!hStore)
