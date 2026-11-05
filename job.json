@@ -1,0 +1,49 @@
+{
+  "job": "L20-item10-crast-rov",
+  "lab": "Lab03 (Linux + KVM); LIGHT: incremental component build + one VM boot. Slot it beside L19 (L19 keeps priority; never while L19 stage B builds)",
+  "description": "LiberX roadmap item 10: ConservativeRasterizationTier from VK_EXT_conservative_rasterization in vkd3d (tier 1/2 honestly, tier 3 never: no SV_InnerCoverage in the SPIR-V backend), pipeline states honour ConservativeRaster ON (or fail cleanly at tier 0); ROVsSupported was already VK_EXT_fragment_shader_interlock. Contract fixture liberx_contracts v2 adds the tier/ROV/FL 12_1/PSO cases.",
+  "source": {
+    "repo": "LiberX (private); exchange ref to be pushed by god",
+    "ref": "refs/heads/src/liberx-item10-crast-rov  (LiberX branch liberx/item10-crast-rov)",
+    "sha": "8c674f984c0c7556ce0c1fa2f36c06773d42d4f2",
+    "base": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (LiberX main)",
+    "commits": [
+      "1b68c5a5c vkd3d: report the conservative rasterization tier from VK_EXT_conservative_rasterization  (vkd3d_private.h, device.c, state.c)",
+      "8c674f984 tests: conservative rasterization and ROV contracts (liberx_contracts v2)  (tests/liberx-contracts/contracts.c)"
+    ],
+    "fetch": "git fetch https://github.com/LeewayOpenSoftware/LiberLabs.git refs/heads/src/liberx-item10-crast-rov:refs/heads/liberx-item10-crast-rov && git checkout 8c674f984c0c7556ce0c1fa2f36c06773d42d4f2",
+    "bundle_fallback": { "file": "liberx-item10-crast-rov.bundle", "ref_inside": "refs/heads/liberx/item10-crast-rov", "prerequisite": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (main; L19 stage A gives it to you, or a98b7124f + the L19 bundle)", "commits": 2, "sha256_in": "SHA256SUMS" },
+    "status_honest": "implemented: yes. compiled: device.c, state.c and contracts.c pass -fsyntax-only with the real amd64 Clang Debug flags (0 diagnostics); not linked. host-tested: no. VM-tested: no (this job). Reference used: none (vkd3d-proton's tier mapping was consulted as LGPL reference reading only, nothing copied)."
+  },
+  "build": {
+    "config": "same configured tree as L6/L19 (amd64 Clang Debug); no ENABLE_* flags",
+    "targets": "ninja -C output-Clang-amd64-debug -j2 -k 0 vkd3d d3d12 d3dcompiler_47 liberx_contracts   (then re-collect the full 25-DLL set as in L6 so the integ payload is complete from 8c674f984)",
+    "expected": "exit 0, 0 errors; warnings counted (report any new one in device.c/state.c). sha256 of d3d12.dll and liberx_contracts.exe."
+  },
+  "image": "COPY of LDW run 41858171199 artifact LiberNT-img-clang-amd64-36a28891bae; KVM -M pc -cpu max -smp 2 -m 1024, OVMF, IDE overlay, offline, payload read-only vvfat D:; fresh overlay; Startup hook starts D:\\launcher.cmd",
+  "vulkan_icd": {
+    "why": "the image has no Vulkan ICD, so every d3d12 case SKIPs at 'device' (L6/L6b). The image's own OOBE installs Lavapipe when online from a public LiberNT release; put that MSI on the payload and the launcher installs it offline (msiexec /qn) before the fixtures run.",
+    "msi": "https://github.com/LiberNT/LiberNT/releases/download/mesa-llvmpipe-26.2.2-1/libernt-mesa-llvmpipe-26.2.2-1-amd64.msi",
+    "sha256": "33c698cf25a0ad59756d26b4248793828da5e23c77b0e7aecdd5f45234d0dd37  (from base/setup/libernt/oobeapps.inf [LLVMpipe.amd64] on leeway/upstream-sync-1105)",
+    "payload": "mesa\\libernt-mesa-llvmpipe-26.2.2-1-amd64.msi (150 MB class; the launcher tolerates its absence: then only the no-ICD outcome is recorded)",
+    "note": "Mesa 26.2 Lavapipe advertises VK_EXT_conservative_rasterization and VK_EXT_fragment_shader_interlock; if msiexec fails on this image, report the exit code and the reg query output and run anyway."
+  },
+  "payload_layout": {
+    "launcher.cmd": "this folder's launcher.cmd (installs mesa\\*.msi if present, reg-queries the ICD key, runs base then integ)",
+    "base\\": "liberx_contracts.exe only (image DLLs: the OLD vkd3d ignores ConservativeRaster)",
+    "integ\\": "liberx_contracts.exe + all 25 DLLs from the 8c674f984 build",
+    "mesa\\": "the Lavapipe MSI (optional)"
+  },
+  "expected": {
+    "with_icd": {
+      "integ": "d3d12 'device' reached; new cases: options-query PASS; crast-tier-range PASS with tier=1 or 2 (Lavapipe: expect 2: overestimation 0 and degenerates rasterized); rov-bool PASS rov=1; fl-12_1-honest PASS (12_1 only if TiledResourcesTier>=2 too, which this vkd3d does not have, so max is 11_1 or 12_0: still honest); crast-pso-accepted PASS (tier>=1). Every pre-existing contract case unchanged vs L6b (41 PASS, 'device SKIP' now gone => more cases execute: record the new totals).",
+      "base": "same exe, image DLLs: tier=0, rov=0 expected; crast-pso-tier0-rejected is EXPECTED TO FAIL on base (the old vkd3d ignores the flag and creates the pipeline): that FAIL documents the gap item 10 closes, it is not a regression. Report it as such.",
+      "rule": "integ: 0 FAIL among the new cases and no pre-existing case worse than L6b integ; crash/hang = FAIL."
+    },
+    "without_icd": {
+      "both": "d3d12 'device SKIP no device at 11_0' exactly as L6b; the new cases are unreachable. Then this job proves only that nothing regressed (41/0/1 integ as L6b minus nothing) and the tier work stays VM-UNTESTED: say so."
+    }
+  },
+  "report_back": "C:\\l6\\com2-L20.txt in full (both runs), msiexec/reg output, build tail + warnings count + sha256, com1.log of the boot; totals per run vs L6b (contracts 41/0/1).",
+  "do_not": "no push to LiberX/LiberNT-LDW or anywhere; no source edits (report instead); do not run while L19 stage B builds; do not interrupt other tests."
+}
