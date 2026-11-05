@@ -1,0 +1,46 @@
+{
+  "job": "S1-schannel-gate",
+  "description": "Schannel S1 (HTTPS) VM gate: crypt32 authroot work plus the filled schannel SSP tables, OFFLINE guest with a local TLS server inside the guest (tlspoc identity, TLS1.2/1.3). Taken over from Phyllis (paused); items 2 and 3 of her branch rebased on 36a28891bae + Stanley's crypt32-authroot chain; her item 1 dropped as a duplicate of 97bd20bf (Root aggregates AuthRoot, read-only, caller location).",
+  "base": "36a28891bae00c5eb16b4d25cd6da016b391a4fc (public LiberNT-LDW; prerequisite)",
+  "sha": "4ef505c8db",
+  "ref_in_bundle": "refs/heads/leeway/schannel-s1",
+  "bundle": {"file": "schannel-s1.bundle", "base64": "bundle.b64", "sha256": "da23c3417ada80a76935e879a5ab1264a3548c34a25ad7667f1c4ba493a3183e", "commits": 9, "prerequisite": "36a28891bae"},
+  "commits": [
+    "428ae99443 crypt32: reject partial certificate chains under the SSL chain policy (Stanley)",
+    "f2a2d26971 crypt32: honor hExclusiveRoot in a Windows 7-sized chain engine config (Stanley)",
+    "51fb48cc50 [CRYPT32] Aggregate AuthRoot into the logical Root system store (Stanley 97bd20bf, replaces Phyllis de6b9b65db)",
+    "10a31d6808 and debc7dd1c7 crypt32 chain tests (Stanley)",
+    "c4020cd0cb [CRYPT32_APITEST] Import advapi32 for the generated test certificates (64616ad1)",
+    "aece1b59d4 [CRYPT32_APITEST] Register the CertOpenSystemStore test with START_TEST (3fa0ffcf)",
+    "ad4d1e994d [CRYPT32_APITEST] Pin exclusive-root chain-engine trust semantics (Phyllis 10c420811c, item 2)",
+    "4ef505c8db [SCHANNEL] Fill the SSP dispatch tables with adapters over secur32 (Phyllis f4f272bf91, item 3)"
+  ],
+  "build": {
+    "targets": ["crypt32", "schannel", "crypt32_apitest", "schannel_winetest"],
+    "config": "LiberNT CI amd64 clang config with ROSTESTS for the test targets",
+    "syntax_check": "-fsyntax-only with the real amd64-debug flags: rc 0 for schannel adapters/lsamode/usermode and crypt32 store/chain; the two apitests with the crypt32 flags plus the apitest include dir: rc 0. Compiled by syntax only here."
+  },
+  "tools": {
+    "dir": "tools/",
+    "files": ["gate.cmd", "s0probe.exe", "s0server.exe (mbedTLS tlspoc identity)", "s0winhttp.exe"],
+    "src": "tools/src (sources; the certificate is a test-only identity)",
+    "note": "Prebuilt on the host by Phyllis; rebuild from tools/src if preferred. crypt32.dll, schannel.dll and the two test exes are NOT provided: use the lab build of this branch so no stale binary is used."
+  },
+  "vm": {
+    "mode": "OFFLINE guest, no external network. The server runs inside the guest on 10.0.2.15:4443 and gate.cmd adds '10.0.2.15 tlspoc.local' to hosts. Read-only vvfat payload drive with the freshly built crypt32.dll, schannel.dll, crypt32_apitest.exe, schannel_winetest.exe plus tools/*.",
+    "settings": "shared/libernt/liberlabs/vm/LAB01-VM-SETTINGS.md (or the Lab03 equivalent)"
+  },
+  "steps": [
+    "apply the bundle, build the four targets, record sha256",
+    "payload = built dlls and tests + tools/ (gate.cmd unchanged)",
+    "boot a fresh overlay of the 36a28891bae image, run gate.cmd: it starts the server, installs the test CA into ROOT via s0probe, runs s0winhttp WITHOUT ignore flags, then crypt32_apitest and schannel_winetest, and writes s1-result.txt ending with '=== GATE DONE'"
+  ],
+  "pass": [
+    "s0winhttp https://tlspoc.local:4443 returns HTTP 200 with no ignore flags (baseline: 12157 ERROR_WINHTTP_SECURE_CHANNEL_ERROR)",
+    "crypt32_apitest: CertOpenSystemStore and CertCreateChainEngine run (not skipped) with 0 failures; the exclusive-root leaf chain reports error 0x0 and SSL policy 0x0",
+    "schannel_winetest: no new failures versus the 36a28891bae baseline (run the baseline winetest in the same image first for the numbers)",
+    "no bugcheck, clean shutdown"
+  ],
+  "if_12157_remains": "report the exact gle and the s0server log line ('handshake ok: TLSv1.2/1.3' means the failure is post-handshake certificate policy: report the trust/policy error bits from s0winhttp and the s0probe census of ROOT/AuthRoot). Do not widen trust to make it pass.",
+  "report_back": "s1-result.txt in full, crypt32.dll and schannel.dll sha256, apitest and winetest summary lines, comparison with the baseline winetest numbers"
+}
