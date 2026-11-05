@@ -1,0 +1,35 @@
+{
+  "job": "L21-item9-shader-matrix",
+  "lab": "Lab03 (Linux + KVM); LIGHT: incremental component build + one VM boot, no Vulkan ICD needed. Slot beside L19/L20 (L19 keeps priority; never while L19 stage B builds)",
+  "description": "LiberX roadmap item 9, second slice: liberx_shaders v2 adds a profile matrix (4 fixtures x vs/ps/cs 4_0, 4_1, 5_0, 5_1 = 16 cases) whose expected facts (accept/reject, resource bindings, input/output signatures, constant buffer layouts, thread group size) were derived on the owner host from Microsoft fxc.exe (Windows SDK 10.0.26100.0) listings of the same HLSL, as the owner allowed (reference use only; our HLSL and the facts are committed, no foreign bytecode). This run tells which facts our d3dcompiler_47 (vkd3d-shader HLSL compiler) gets wrong; fixes come after, only where it diverges.",
+  "source": {
+    "repo": "LiberX (private); exchange ref to be pushed by god",
+    "ref": "refs/heads/src/liberx-item9-shader-matrix  (LiberX branch liberx/item9-shader-matrix)",
+    "sha": "3eb9f516b75274c506bd9e5ec4324906ef118c5e",
+    "base": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (LiberX main)",
+    "commits": [
+      "3eb9f516b tests: shader profile matrix with facts derived from the reference compiler (liberx_shaders v2)  (tests/liberx-shaders/shaders.c only)"
+    ],
+    "fetch": "git fetch https://github.com/LeewayOpenSoftware/LiberLabs.git refs/heads/src/liberx-item9-shader-matrix:refs/heads/liberx-item9-shader-matrix && git checkout 3eb9f516b75274c506bd9e5ec4324906ef118c5e",
+    "bundle_fallback": { "file": "liberx-item9-shader-matrix.bundle", "ref_inside": "refs/heads/liberx/item9-shader-matrix", "prerequisite": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc", "commits": 1, "sha256_in": "SHA256SUMS" },
+    "status_honest": "implemented: yes (test only; no compiler change yet). compiled: shaders.c passes -fsyntax-only with the real tree flags (0 diagnostics). host-tested: the expected facts come from fxc.exe 10.0.26100.0 run from the command line on the owner host; the test itself has not run anywhere. VM-tested: no (this job)."
+  },
+  "build": {
+    "config": "same configured tree as L6/L19 (amd64 Clang Debug)",
+    "targets": "ninja -C output-Clang-amd64-debug -j2 -k 0 d3dcompiler_47 liberx_shaders   (then re-collect the full 25-DLL set as in L6 for the integ payload)",
+    "expected": "exit 0, 0 errors. sha256 of d3dcompiler_47.dll and liberx_shaders.exe."
+  },
+  "image": "COPY of LDW run 41858171199 artifact LiberNT-img-clang-amd64-36a28891bae; KVM -M pc -cpu max -smp 2 -m 1024, OVMF, IDE overlay, offline, payload read-only vvfat D:; fresh overlay; Startup hook starts D:\\launcher.cmd",
+  "payload_layout": {
+    "launcher.cmd": "this folder's launcher.cmd (base then integ)",
+    "base\\": "liberx_shaders.exe only (image d3dcompiler_47.dll)",
+    "integ\\": "liberx_shaders.exe + all 25 DLLs from the 3eb9f516b build"
+  },
+  "expected": {
+    "v1_part": "the 'SHADER v2' lines for the v1 groups (bad, vs_5_0, ps_5_0, cs_5_0, matrix) must match L6b's liberx_shaders result (63 PASS 0 FAIL on integ; base 62/1) except the version tag.",
+    "matrix": "16 cases: 12 '<profile>-compile' PASS expected to compile, 4 expected to fail (cs_structured on cs_4_0/cs_4_1: UAV slot u1 beyond the 1 UAV of cs_4_x; ps_uav on ps_4_0/ps_4_1: no UAVs). For the 12 compiling cases, 5 fact checks each (bindings, inputs, outputs, cbuffers, threadgroup) = 60 fact lines + 12 reflect lines.",
+    "rule": "This is a MEASUREMENT run: every FAIL among the fact lines is a divergence of our compiler from the reference facts and is the deliverable (report each line verbatim). Not a regression gate, except: no crash/hang, and the v1 part unchanged. base vs integ differences show what changed in d3dcompiler_47 since the image."
+  },
+  "report_back": "C:\\l6\\com2-L21.txt in full (both runs), every FAIL line verbatim, totals base/integ, build tail + sha256, com1.log of the boot.",
+  "do_not": "no push; no source edits (report instead); do not run while L19 stage B builds; do not interrupt other tests."
+}
