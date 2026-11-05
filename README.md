@@ -28,6 +28,7 @@ refs/heads/src/<branch>         one ref per internal LiberNT or LiberX branch, a
 | `src/net-m1-stats` | `1b5e6b8dd053df830740517c7186525eae262f6b` | Ryan, networking M1 stats |
 | `src/liberx-merge-3` | `a98b7124f887e87ee3b558def419e61ba62a6583` | LiberX (separate history, private): merge-3 integrated tree (items 1, 7, 5, 6b, 6, 8, contract-findings) on LiberX main 2627bc87c, + 3 fixes after Lab03 run L6 (d3d12 NULL-out entry, two fixture corrections) |
 | `src/liberx-item18-dxc` | `d01990b9d364d8cd5b1b5295f48e75942f2fb793` | LiberX item 18 DXC Level 1 (dxcompiler + liberx_dxc), 4 commits on 2627bc87c |
+| `src/liberx-item18-dxc-l2` | `9b328b9fa158102ba0cc8ef5bf2ac32ac13da578` | DXC Level 2: L1 rebased on main e15f0fbec + ENABLE_DXCOMPILER_L2 gate + SM6 fixtures (liberx/item18-dxc-l2); job L19-dxc-l2 |
 
 (The table is maintained by hand when a ref is pushed; `git ls-remote --heads` is authoritative.)
 
