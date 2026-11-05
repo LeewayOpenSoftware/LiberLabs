@@ -175,14 +175,27 @@ static void STDMETHODCALLTYPE d3d11_texture1d_GetType(ID3D11Texture1D *iface,
 
 static void STDMETHODCALLTYPE d3d11_texture1d_SetEvictionPriority(ID3D11Texture1D *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %#x stub!\n", iface, eviction_priority);
+    struct d3d_texture1d *texture = impl_from_ID3D11Texture1D(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    wined3d_mutex_lock();
+    texture->eviction_priority = eviction_priority;
+    wined3d_mutex_unlock();
 }
 
 static UINT STDMETHODCALLTYPE d3d11_texture1d_GetEvictionPriority(ID3D11Texture1D *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_texture1d *texture = impl_from_ID3D11Texture1D(iface);
+    UINT eviction_priority;
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    eviction_priority = texture->eviction_priority;
+    wined3d_mutex_unlock();
+
+    return eviction_priority;
 }
 
 static void STDMETHODCALLTYPE d3d11_texture1d_GetDesc(ID3D11Texture1D *iface, D3D11_TEXTURE1D_DESC *desc)
@@ -317,14 +330,20 @@ static void STDMETHODCALLTYPE d3d10_texture1d_GetType(ID3D10Texture1D *iface,
 
 static void STDMETHODCALLTYPE d3d10_texture1d_SetEvictionPriority(ID3D10Texture1D *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %u stub!\n", iface, eviction_priority);
+    struct d3d_texture1d *texture = impl_from_ID3D10Texture1D(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    d3d11_texture1d_SetEvictionPriority(&texture->ID3D11Texture1D_iface, eviction_priority);
 }
 
 static UINT STDMETHODCALLTYPE d3d10_texture1d_GetEvictionPriority(ID3D10Texture1D *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_texture1d *texture = impl_from_ID3D10Texture1D(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    return d3d11_texture1d_GetEvictionPriority(&texture->ID3D11Texture1D_iface);
 }
 
 /* ID3D10Texture1D methods */
@@ -662,14 +681,27 @@ static void STDMETHODCALLTYPE d3d11_texture2d_GetType(ID3D11Texture2D *iface,
 
 static void STDMETHODCALLTYPE d3d11_texture2d_SetEvictionPriority(ID3D11Texture2D *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %#x stub!\n", iface, eviction_priority);
+    struct d3d_texture2d *texture = impl_from_ID3D11Texture2D(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    wined3d_mutex_lock();
+    texture->eviction_priority = eviction_priority;
+    wined3d_mutex_unlock();
 }
 
 static UINT STDMETHODCALLTYPE d3d11_texture2d_GetEvictionPriority(ID3D11Texture2D *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_texture2d *texture = impl_from_ID3D11Texture2D(iface);
+    UINT eviction_priority;
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    eviction_priority = texture->eviction_priority;
+    wined3d_mutex_unlock();
+
+    return eviction_priority;
 }
 
 static void STDMETHODCALLTYPE d3d11_texture2d_GetDesc(ID3D11Texture2D *iface, D3D11_TEXTURE2D_DESC *desc)
@@ -818,14 +850,20 @@ static void STDMETHODCALLTYPE d3d10_texture2d_GetType(ID3D10Texture2D *iface,
 
 static void STDMETHODCALLTYPE d3d10_texture2d_SetEvictionPriority(ID3D10Texture2D *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %u stub!\n", iface, eviction_priority);
+    struct d3d_texture2d *texture = impl_from_ID3D10Texture2D(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    d3d11_texture2d_SetEvictionPriority(&texture->ID3D11Texture2D_iface, eviction_priority);
 }
 
 static UINT STDMETHODCALLTYPE d3d10_texture2d_GetEvictionPriority(ID3D10Texture2D *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_texture2d *texture = impl_from_ID3D10Texture2D(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    return d3d11_texture2d_GetEvictionPriority(&texture->ID3D11Texture2D_iface);
 }
 
 /* ID3D10Texture2D methods */
@@ -1223,14 +1261,27 @@ static void STDMETHODCALLTYPE d3d11_texture3d_GetType(ID3D11Texture3D *iface,
 
 static void STDMETHODCALLTYPE d3d11_texture3d_SetEvictionPriority(ID3D11Texture3D *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %#x stub!\n", iface, eviction_priority);
+    struct d3d_texture3d *texture = impl_from_ID3D11Texture3D(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    wined3d_mutex_lock();
+    texture->eviction_priority = eviction_priority;
+    wined3d_mutex_unlock();
 }
 
 static UINT STDMETHODCALLTYPE d3d11_texture3d_GetEvictionPriority(ID3D11Texture3D *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_texture3d *texture = impl_from_ID3D11Texture3D(iface);
+    UINT eviction_priority;
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    eviction_priority = texture->eviction_priority;
+    wined3d_mutex_unlock();
+
+    return eviction_priority;
 }
 
 static void STDMETHODCALLTYPE d3d11_texture3d_GetDesc(ID3D11Texture3D *iface, D3D11_TEXTURE3D_DESC *desc)
@@ -1344,14 +1395,20 @@ static void STDMETHODCALLTYPE d3d10_texture3d_GetType(ID3D10Texture3D *iface,
 
 static void STDMETHODCALLTYPE d3d10_texture3d_SetEvictionPriority(ID3D10Texture3D *iface, UINT eviction_priority)
 {
-    FIXME("iface %p, eviction_priority %u stub!\n", iface, eviction_priority);
+    struct d3d_texture3d *texture = impl_from_ID3D10Texture3D(iface);
+
+    TRACE("iface %p, eviction_priority %#x.\n", iface, eviction_priority);
+
+    d3d11_texture3d_SetEvictionPriority(&texture->ID3D11Texture3D_iface, eviction_priority);
 }
 
 static UINT STDMETHODCALLTYPE d3d10_texture3d_GetEvictionPriority(ID3D10Texture3D *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_texture3d *texture = impl_from_ID3D10Texture3D(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    return d3d11_texture3d_GetEvictionPriority(&texture->ID3D11Texture3D_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_texture3d_Map(ID3D10Texture3D *iface, UINT sub_resource_idx,

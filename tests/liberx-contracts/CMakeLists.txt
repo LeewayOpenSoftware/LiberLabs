@@ -28,3 +28,8 @@ add_executable(liberx_dxgi_priority dxgi-priority.c)
 set_module_type(liberx_dxgi_priority win32cui)
 add_dependencies(liberx_dxgi_priority psdk)
 add_importlibs(liberx_dxgi_priority msvcrt kernel32 d3d11 dxgi)
+
+add_executable(liberx_d3d11_eviction d3d11-eviction.c)
+set_module_type(liberx_d3d11_eviction win32cui)
+add_dependencies(liberx_d3d11_eviction psdk)
+add_importlibs(liberx_d3d11_eviction msvcrt kernel32 d3d11)
