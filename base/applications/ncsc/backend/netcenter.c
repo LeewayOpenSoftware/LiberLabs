@@ -791,7 +791,10 @@ VOID NcRunDiagnostics(NC_DIAG_REPORT *Report, NC_DIAG_PROGRESS Progress, PVOID C
 
         RtlZeroMemory(&tcp, sizeof(tcp));
         tcpError = GetTcpStatistics(&tcp);
-        if (tcpError == NO_ERROR)
+        if (tcpError == NO_ERROR && !stats.dwInReceives && !stats.dwInDelivers && !tcp.dwActiveOpens && !tcp.dwPassiveOpens &&
+            !tcp.dwCurrEstab && !tcp.dwInSegs && !tcp.dwOutSegs)
+            SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_WARN, L"Statistics unavailable: the stack answers but every IP and TCP counter is 0, which cannot be right after traffic. It probably does not serve statistics yet; the counters are not used as a result.");
+        else if (tcpError == NO_ERROR)
             SetStep(Report, 2, L"Local TCP/IP stack", NC_DIAG_PASS, L"IP: %lu datagrams received; TCP: %lu active and %lu passive opens, %lu connections.",
                     stats.dwInReceives, tcp.dwActiveOpens, tcp.dwPassiveOpens, tcp.dwCurrEstab);
         else
