@@ -48,6 +48,19 @@ int main(void)
         check("texture2d_roundtrip",p==0x70000000u,"set 0x70000000 got 0x%08x",p);
     } else report("create_texture2d","SKIP","hr=0x%08lx",hr);
 
+    /* exception-mode round-trip (same device) */
+    {
+        HRESULT ehr; UINT em;
+        ehr=ID3D11Device_SetExceptionMode(dev,0);
+        em=ID3D11Device_GetExceptionMode(dev);
+        check("exception_mode_zero",SUCCEEDED(ehr)&&em==0,"Set(0) hr=0x%08lx get=%u",ehr,em);
+        ehr=ID3D11Device_SetExceptionMode(dev,1);
+        em=ID3D11Device_GetExceptionMode(dev);
+        check("exception_mode_one",SUCCEEDED(ehr)&&em==1,"Set(1) hr=0x%08lx get=%u",ehr,em);
+        ehr=ID3D11Device_SetExceptionMode(dev,2);
+        check("exception_mode_bad",ehr==E_INVALIDARG,"Set(2) hr=0x%08lx (expect E_INVALIDARG)",ehr);
+    }
+
 done:
     if(tex) ID3D11Texture2D_Release(tex);
     if(buf) ID3D11Buffer_Release(buf);

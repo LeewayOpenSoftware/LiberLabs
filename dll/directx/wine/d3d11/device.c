@@ -5317,16 +5317,35 @@ static void STDMETHODCALLTYPE d3d11_device_GetImmediateContext(ID3D11Device5 *if
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_SetExceptionMode(ID3D11Device5 *iface, UINT flags)
 {
-    FIXME("iface %p, flags %#x stub!\n", iface, flags);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, flags %#x.\n", iface, flags);
+
+    /* Only D3D11_RAISE_FLAG_DRIVER_INTERNAL_ERROR (0x1) is defined; reject any
+     * other bit. The flag round-trips through GetExceptionMode (documented
+     * contract); the software path does not raise on it. */
+    if (flags & ~0x1u)
+        return E_INVALIDARG;
+
+    wined3d_mutex_lock();
+    device->exception_mode = flags;
+    wined3d_mutex_unlock();
+
+    return S_OK;
 }
 
 static UINT STDMETHODCALLTYPE d3d11_device_GetExceptionMode(ID3D11Device5 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
+    UINT flags;
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    flags = device->exception_mode;
+    wined3d_mutex_unlock();
+
+    return flags;
 }
 
 static void STDMETHODCALLTYPE d3d11_device_GetImmediateContext1(ID3D11Device5 *iface,
