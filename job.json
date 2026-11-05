@@ -5,15 +5,23 @@
   "source": {
     "repo": "LiberX (private); exchange ref to be pushed by god",
     "ref": "refs/heads/src/liberx-item10-crast-rov  (LiberX branch liberx/item10-crast-rov)",
-    "sha": "8c674f984c0c7556ce0c1fa2f36c06773d42d4f2",
+    "sha": "32538a18fb2b0ec577e527abc880bc0e5334dd68",
     "base": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (LiberX main)",
     "commits": [
       "1b68c5a5c vkd3d: report the conservative rasterization tier from VK_EXT_conservative_rasterization  (vkd3d_private.h, device.c, state.c)",
-      "8c674f984 tests: conservative rasterization and ROV contracts (liberx_contracts v2)  (tests/liberx-contracts/contracts.c)"
+      "8c674f984 tests: conservative rasterization and ROV contracts (liberx_contracts v2)  (tests/liberx-contracts/contracts.c)",
+      "814b5f611 vkd3d: advertise WriteBufferImmediate for the queue types that serve it  (device.c flags DIRECT|COMPUTE|COPY; command.c rejects bundles)",
+      "32538a18f tests: WriteBufferImmediate contracts  (wbi-flags-defined, wbi-write-readback, wbi-flags-direct, wbi-bad-mode-rejected)"
     ],
-    "fetch": "git fetch https://github.com/LeewayOpenSoftware/LiberLabs.git refs/heads/src/liberx-item10-crast-rov:refs/heads/liberx-item10-crast-rov && git checkout 8c674f984c0c7556ce0c1fa2f36c06773d42d4f2",
-    "bundle_fallback": { "file": "liberx-item10-crast-rov.bundle", "ref_inside": "refs/heads/liberx/item10-crast-rov", "prerequisite": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (main; L19 stage A gives it to you, or a98b7124f + the L19 bundle)", "commits": 2, "sha256_in": "SHA256SUMS" },
-    "status_honest": "implemented: yes. compiled: device.c, state.c and contracts.c pass -fsyntax-only with the real amd64 Clang Debug flags (0 diagnostics); not linked. host-tested: no. VM-tested: no (this job). Reference used: none (vkd3d-proton's tier mapping was consulted as LGPL reference reading only, nothing copied)."
+    "fetch": "git fetch https://github.com/LeewayOpenSoftware/LiberLabs.git refs/heads/src/liberx-item10-crast-rov:refs/heads/liberx-item10-crast-rov && git checkout 32538a18fb2b0ec577e527abc880bc0e5334dd68",
+    "bundle_fallback": {
+      "file": "liberx-item10-crast-rov.bundle",
+      "ref_inside": "refs/heads/liberx/item10-crast-rov",
+      "prerequisite": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (main; L19 stage A gives it to you, or a98b7124f + the L19 bundle)",
+      "commits": 4,
+      "sha256_in": "SHA256SUMS"
+    },
+    "status_honest": "implemented: yes. compiled: device.c, state.c, command.c and contracts.c pass -fsyntax-only with the real amd64 Clang Debug flags (0 diagnostics); not linked. host-tested: no. VM-tested: no (this job). Reference used: none (vkd3d-proton's tier mapping was consulted as LGPL reference reading only, nothing copied)."
   },
   "build": {
     "config": "same configured tree as L6/L19 (amd64 Clang Debug); no ENABLE_* flags",
@@ -36,8 +44,8 @@
   },
   "expected": {
     "with_icd": {
-      "integ": "d3d12 'device' reached; new cases: options-query PASS; crast-tier-range PASS with tier=1 or 2 (Lavapipe: expect 2: overestimation 0 and degenerates rasterized); rov-bool PASS rov=1; fl-12_1-honest PASS (12_1 only if TiledResourcesTier>=2 too, which this vkd3d does not have, so max is 11_1 or 12_0: still honest); crast-pso-accepted PASS (tier>=1). Every pre-existing contract case unchanged vs L6b (41 PASS, 'device SKIP' now gone => more cases execute: record the new totals).",
-      "base": "same exe, image DLLs: tier=0, rov=0 expected; crast-pso-tier0-rejected is EXPECTED TO FAIL on base (the old vkd3d ignores the flag and creates the pipeline): that FAIL documents the gap item 10 closes, it is not a regression. Report it as such.",
+      "integ": "d3d12 'device' reached; new cases: options-query PASS; crast-tier-range PASS with tier=1 or 2 (Lavapipe: expect 2: overestimation 0 and degenerates rasterized); rov-bool PASS rov=1; fl-12_1-honest PASS (12_1 only if TiledResourcesTier>=2 too, which this vkd3d does not have, so max is 11_1 or 12_0: still honest); crast-pso-accepted PASS (tier>=1). Every pre-existing contract case unchanged vs L6b (41 PASS, 'device SKIP' now gone => more cases execute: record the new totals). NEW (WriteBufferImmediate): wbi-flags-defined PASS flags=0xd, wbi-write-readback PASS data=0x12345678 0xcafebabe, wbi-flags-direct PASS, wbi-bad-mode-rejected PASS.",
+      "base": "same exe, image DLLs: tier=0, rov=0 expected; crast-pso-tier0-rejected is EXPECTED TO FAIL on base (the old vkd3d ignores the flag and creates the pipeline): that FAIL documents the gap item 10 closes, it is not a regression. Report it as such. On base, wbi-flags-defined PASS (flags=0), wbi-write-readback may PASS (the old code also fills), wbi-flags-direct FAILS by design (flags=0 while the write worked): the gap, not a regression.",
       "rule": "integ: 0 FAIL among the new cases and no pre-existing case worse than L6b integ; crash/hang = FAIL."
     },
     "without_icd": {
