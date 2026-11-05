@@ -261,21 +261,24 @@ HRESULT WINAPI D3D10CompileEffectFromMemory(void *data, SIZE_T data_size, const 
 
 const char * WINAPI D3D10GetVertexShaderProfile(ID3D10Device *device)
 {
-    FIXME("device %p stub!\n", device);
+    TRACE("device %p.\n", device);
 
+    /* Direct3D 10 shaders target the Shader Model 4.0 profiles. */
     return "vs_4_0";
 }
 
 const char * WINAPI D3D10GetGeometryShaderProfile(ID3D10Device *device)
 {
-    FIXME("device %p stub!\n", device);
+    TRACE("device %p.\n", device);
 
+    /* Direct3D 10 shaders target the Shader Model 4.0 profiles. */
     return "gs_4_0";
 }
 
 const char * WINAPI D3D10GetPixelShaderProfile(ID3D10Device *device)
 {
-    FIXME("device %p stub!\n", device);
+    TRACE("device %p.\n", device);
 
+    /* Direct3D 10 shaders target the Shader Model 4.0 profiles. */
     return "ps_4_0";
 }
