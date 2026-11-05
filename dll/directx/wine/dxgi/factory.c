@@ -354,13 +354,12 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSoftwareAdapter(IWineDXGIFac
 
 static BOOL STDMETHODCALLTYPE dxgi_factory_IsCurrent(IWineDXGIFactory *iface)
 {
-    static BOOL once = FALSE;
+    TRACE("iface %p.\n", iface);
 
-    if (!once++)
-        FIXME("iface %p stub!\n", iface);
-    else
-        WARN("iface %p stub!\n", iface);
-
+    /* IsCurrent reports FALSE only when the adapter set changed since the
+     * factory was created, telling the app to recreate it. This adapter set is
+     * static (no hot-plug tracking), so the factory never goes stale -> TRUE.
+     * This matches Windows on a machine whose adapters do not change. */
     return TRUE;
 }
 
