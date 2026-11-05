@@ -499,6 +499,30 @@ static DWORD PingV4(PCWSTR Numeric, DWORD *RoundTrip)
     return status;
 }
 
+ULONG NcAdapterSignature(const NC_ADAPTER_LIST *List)
+{
+    ULONG hash = 2166136261UL, i, j, k;
+
+#define MIX(v) do { hash ^= (ULONG)(v); hash *= 16777619UL; } while (0)
+    for (i = 0; List && i < List->Count; i++)
+    {
+        const NC_ADAPTER *a = &List->Adapters[i];
+
+        if (a->IsLoopback)
+            continue;
+        MIX(a->IfIndex);
+        MIX(a->IsUp);
+        for (j = 0; j < a->AddressCount; j++)
+            for (k = 0; a->Addresses[j].Text[k]; k++)
+                MIX(a->Addresses[j].Text[k]);
+        for (j = 0; j < a->GatewayCount; j++)
+            for (k = 0; a->Gateways[j][k]; k++)
+                MIX(a->Gateways[j][k]);
+    }
+#undef MIX
+    return hash;
+}
+
 /* ---- Internet probe ---- */
 
 static BOOL AnyUp(const NC_ADAPTER_LIST *List, BOOL V6, BOOL Gateway)

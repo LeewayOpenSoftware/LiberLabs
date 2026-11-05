@@ -13,6 +13,10 @@
 #include <wingdi.h>
 #include <winuser.h>
 #include <shellapi.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <netioapi.h>
 #include <strsafe.h>
 
 #include "netcenter.h"
@@ -20,7 +24,10 @@
 
 #define WM_NCSC_PROBED  (WM_APP + 1)  /* lParam: NC_ACCESS allocated with LocalAlloc */
 #define WM_NCSC_TEXT    (WM_APP + 2)  /* lParam: WCHAR text allocated with LocalAlloc */
+#define WM_NCSC_NETCHANGE (WM_APP + 3) /* an interface or address changed */
 #define TIMER_REFRESH   1
+#define TIMER_CHANGE    2
+#define CHANGE_DELAY_MS 400
 #define REFRESH_MS      15000
 #define PROBE_EVERY     4             /* every fourth refresh, about once a minute */
 #define MAX_LINKS       64
@@ -56,6 +63,10 @@ static NC_IDENTITY g_Identity;
 static NC_FEATURES g_Features;
 static NC_ACCESS g_Access;
 static BOOL g_ProbeRunning, g_ProbeDone;
+static ULONG g_ProbeGen;      /* generation of the latest probe started */
+static ULONG g_ProbeSig;      /* adapter signature the shown result was measured on */
+static BOOL g_ReprobeNeeded;  /* the network changed while a probe was running */
+static HANDLE g_NotifyInterface, g_NotifyAddress;
 static SYSTEMTIME g_ProbeTime;
 static LINK g_Links[MAX_LINKS];
 static int g_LinkCount, g_Hot = -1;
@@ -73,42 +84,84 @@ static UINT g_Ticks;
 
 /* ---- state ---- */
 
+typedef struct _PROBE_JOB
+{
+    NC_ADAPTER_LIST *List;
+    ULONG Gen;
+    ULONG Sig;
+} PROBE_JOB;
+
+typedef struct _PROBE_RESULT
+{
+    ULONG Gen;
+    ULONG Sig;
+    NC_ACCESS Access;
+} PROBE_RESULT;
+
 static DWORD WINAPI ProbeThread(LPVOID Param)
 {
-    NC_ADAPTER_LIST *snapshot = Param;
-    NC_ACCESS *access = LocalAlloc(LPTR, sizeof(*access));
+    PROBE_JOB *job = Param;
+    PROBE_RESULT *result = LocalAlloc(LPTR, sizeof(*result));
 
-    if (access)
+    if (result)
     {
-        NcProbeInternet(snapshot, access);
-        if (!PostMessageW(g_Main, WM_NCSC_PROBED, 0, (LPARAM)access))
-            LocalFree(access);
+        result->Gen = job->Gen;
+        result->Sig = job->Sig;
+        NcProbeInternet(job->List, &result->Access);
+        if (!PostMessageW(g_Main, WM_NCSC_PROBED, 0, (LPARAM)result))
+            LocalFree(result);
     }
-    NcFreeAdapterList(snapshot);
+    NcFreeAdapterList(job->List);
+    LocalFree(job);
     return 0;
 }
 
 static VOID StartProbe(VOID)
 {
     NC_ADAPTER_LIST *copy;
+    PROBE_JOB *job;
     SIZE_T size;
     HANDLE thread;
 
-    if (g_ProbeRunning || !g_List)
+    if (!g_List)
         return;
+    if (g_ProbeRunning)
+    {
+        g_ReprobeNeeded = TRUE;     /* started again when the running probe returns */
+        return;
+    }
     size = FIELD_OFFSET(NC_ADAPTER_LIST, Adapters) + max(g_List->Count, 1) * sizeof(NC_ADAPTER);
     copy = HeapAlloc(GetProcessHeap(), 0, size);
-    if (!copy)
+    job = LocalAlloc(LPTR, sizeof(*job));
+    if (!copy || !job)
+    {
+        if (copy)
+            NcFreeAdapterList(copy);
+        if (job)
+            LocalFree(job);
         return;
+    }
     RtlCopyMemory(copy, g_List, size);
-    thread = CreateThread(NULL, 0, ProbeThread, copy, 0, NULL);
+    job->List = copy;
+    job->Gen = ++g_ProbeGen;
+    job->Sig = NcAdapterSignature(copy);
+    thread = CreateThread(NULL, 0, ProbeThread, job, 0, NULL);
     if (!thread)
     {
         NcFreeAdapterList(copy);
+        LocalFree(job);
         return;
     }
     CloseHandle(thread);
     g_ProbeRunning = TRUE;
+    g_ReprobeNeeded = FALSE;
+}
+
+/* The shown Internet verdict is only valid for the network it was measured on */
+static VOID InvalidateAccess(VOID)
+{
+    g_ProbeDone = FALSE;
+    RtlZeroMemory(&g_Access, sizeof(g_Access));
 }
 
 static VOID Refresh(BOOL Probe)
@@ -119,6 +172,12 @@ static VOID Refresh(BOOL Probe)
     g_List = list;
     NcGetIdentity(&g_Identity);
     NcQueryFeatures(&g_Features);
+    /* A different set of adapters, addresses or gateways than the one measured: the old verdict is stale */
+    if (g_ProbeDone && NcAdapterSignature(g_List) != g_ProbeSig)
+    {
+        InvalidateAccess();
+        Probe = TRUE;
+    }
     if (Probe)
         StartProbe();
     InvalidateRect(g_Main, NULL, TRUE);
@@ -711,6 +770,17 @@ static VOID MakeFonts(VOID)
     g_FontSmall = CreateFontIndirectW(&lf);
 }
 
+/* Called by the stack on its own thread: only post, never touch the window state here */
+static VOID NETIOAPI_API_ InterfaceChanged(PVOID Context, PMIB_IPINTERFACE_ROW Row, MIB_NOTIFICATION_TYPE Type)
+{
+    PostMessageW(g_Main, WM_NCSC_NETCHANGE, 0, 0);
+}
+
+static VOID NETIOAPI_API_ AddressChanged(PVOID Context, PMIB_UNICASTIPADDRESS_ROW Row, MIB_NOTIFICATION_TYPE Type)
+{
+    PostMessageW(g_Main, WM_NCSC_NETCHANGE, 0, 0);
+}
+
 static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -720,23 +790,53 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             MakeFonts();
             Refresh(TRUE);
             SetTimer(hwnd, TIMER_REFRESH, REFRESH_MS, NULL);
+            /* react at once to an interface or address change; where the stack does not support the
+             * notification the 15 second refresh still notices the change through the signature */
+            if (NotifyIpInterfaceChange(AF_UNSPEC, InterfaceChanged, NULL, FALSE, &g_NotifyInterface) != NO_ERROR)
+                g_NotifyInterface = NULL;
+            if (NotifyUnicastIpAddressChange(AF_UNSPEC, AddressChanged, NULL, FALSE, &g_NotifyAddress) != NO_ERROR)
+                g_NotifyAddress = NULL;
             return 0;
         case WM_TIMER:
+            if (wParam == TIMER_CHANGE)
+            {
+                KillTimer(hwnd, TIMER_CHANGE);
+                Refresh(TRUE);
+                return 0;
+            }
             g_Ticks++;
             Refresh((g_Ticks % PROBE_EVERY) == 0);
             return 0;
         case WM_NCSC_PROBED:
         {
-            NC_ACCESS *access = (NC_ACCESS *)lParam;
+            PROBE_RESULT *result = (PROBE_RESULT *)lParam;
+            BOOL current = (result->Gen == g_ProbeGen) && !g_ReprobeNeeded &&
+                           (g_List && result->Sig == NcAdapterSignature(g_List));
 
-            g_Access = *access;
-            LocalFree(access);
             g_ProbeRunning = FALSE;
-            g_ProbeDone = TRUE;
-            GetLocalTime(&g_ProbeTime);
+            if (current)
+            {
+                g_Access = result->Access;
+                g_ProbeSig = result->Sig;
+                g_ProbeDone = TRUE;
+                GetLocalTime(&g_ProbeTime);
+            }
+            else
+            {
+                /* measured on a network that has changed since: do not show it, check again */
+                InvalidateAccess();
+                StartProbe();
+            }
+            LocalFree(result);
             InvalidateRect(hwnd, NULL, TRUE);
             return 0;
         }
+        case WM_NCSC_NETCHANGE:
+            /* several notifications arrive together: refresh once, and stop showing the old verdict now */
+            InvalidateAccess();
+            InvalidateRect(hwnd, NULL, TRUE);
+            SetTimer(hwnd, TIMER_CHANGE, CHANGE_DELAY_MS, NULL);
+            return 0;
         case WM_ERASEBKGND:
             return 1;
         case WM_PAINT:
@@ -798,7 +898,13 @@ static LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
         case WM_DESTROY:
+            if (g_NotifyInterface)
+                CancelMibChangeNotify2(g_NotifyInterface);
+            if (g_NotifyAddress)
+                CancelMibChangeNotify2(g_NotifyAddress);
+            g_NotifyInterface = g_NotifyAddress = NULL;
             KillTimer(hwnd, TIMER_REFRESH);
+            KillTimer(hwnd, TIMER_CHANGE);
             NcFreeAdapterList(g_List);
             g_List = NULL;
             PostQuitMessage(0);

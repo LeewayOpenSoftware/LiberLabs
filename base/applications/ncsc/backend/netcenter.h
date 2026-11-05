@@ -156,6 +156,10 @@ BOOL NcGetIdentity(NC_IDENTITY *Identity);
  * Configuration (an address, a gateway) is not access: only a connection to the probe counts. */
 VOID NcProbeInternet(const NC_ADAPTER_LIST *List, NC_ACCESS *Access);
 
+/* A hash of what decides reachability (connected adapters, their addresses and gateways): two lists
+ * with different signatures need a new Internet check. */
+ULONG NcAdapterSignature(const NC_ADAPTER_LIST *List);
+
 /* Services behind the sharing and discovery settings */
 VOID NcQueryFeatures(NC_FEATURES *Features);
 
