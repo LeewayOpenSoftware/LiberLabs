@@ -4170,8 +4170,8 @@ WSPStringToAddress(IN LPWSTR AddressString,
             *lpAddressLength = sizeof(*sockaddr);
             memset(lpAddress, 0, sizeof(*sockaddr));
             sockaddr->sin_family = AF_INET;
-            sockaddr->sin_addr.s_addr = inetaddr;
-            sockaddr->sin_port = port;
+            sockaddr->sin_addr.s_addr = htonl(inetaddr);
+            sockaddr->sin_port = htons(port);
         }
     }
     else if (AddressFamily == AF_INET6)
