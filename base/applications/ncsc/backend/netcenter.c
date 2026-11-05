@@ -175,6 +175,7 @@ static VOID CopyAdapter(NC_ADAPTER *Out, const IP_ADAPTER_ADDRESSES *In)
         }
         else
             continue;
+        entry->IsTemporary = (unicast->SuffixOrigin == IpSuffixOriginRandom);
         entry->PrefixLength = unicast->OnLinkPrefixLength;
         FormatSockaddr(sa, unicast->Address.iSockaddrLength, entry->Text, ARRAYSIZE(entry->Text));
         if (entry->Text[0])

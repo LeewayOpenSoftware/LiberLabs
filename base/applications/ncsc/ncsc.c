@@ -357,7 +357,9 @@ static VOID AddressSummary(const NC_ADAPTER *a, BOOL v6, WCHAR *out, UINT count)
 
         if ((entry->IsV6 != 0) != (v6 != 0))
             continue;
-        if (!best || (best->IsLinkLocal && !entry->IsLinkLocal))
+        /* a stable routable address first, then a temporary one, then a link-local one */
+        if (!best || (best->IsLinkLocal && !entry->IsLinkLocal) ||
+            (!best->IsLinkLocal && !entry->IsLinkLocal && best->IsTemporary && !entry->IsTemporary))
             best = entry;
     }
     for (i = 0; i < a->GatewayCount && !gateway; i++)
@@ -708,7 +710,7 @@ static VOID FormatAdapterDetails(const NC_ADAPTER *a, WCHAR *out, UINT count)
         ADD(L"DHCP server:\t\t%s\r\n", a->DhcpServer);
     for (i = 0; i < a->AddressCount; i++)
         ADD(L"%s address:\t\t%s/%lu%s\r\n", a->Addresses[i].IsV6 ? L"IPv6" : L"IPv4", a->Addresses[i].Text, a->Addresses[i].PrefixLength,
-            a->Addresses[i].IsLinkLocal ? L" (link-local)" : L"");
+            a->Addresses[i].IsLinkLocal ? L" (link-local)" : (a->Addresses[i].IsTemporary ? L" (temporary)" : L""));
     if (!a->AddressCount)
         ADD(L"IP addresses:\t\tnone\r\n");
     for (i = 0; i < a->GatewayCount; i++)

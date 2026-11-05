@@ -56,6 +56,7 @@ typedef struct _NC_IPADDR
     ULONG PrefixLength;
     BOOL IsV6;
     BOOL IsLinkLocal;
+    BOOL IsTemporary;      /* a privacy address (SuffixOrigin random), shown after the stable one */
 } NC_IPADDR;
 
 typedef struct _NC_ADAPTER
