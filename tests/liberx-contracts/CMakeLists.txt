@@ -18,3 +18,8 @@ add_executable(liberx_input_contracts input-contracts.c)
 set_module_type(liberx_input_contracts win32cui)
 add_dependencies(liberx_input_contracts psdk)
 add_importlibs(liberx_input_contracts msvcrt kernel32 dinput8 hid setupapi)
+
+add_executable(liberx_xinput_battery xinput-battery.c)
+set_module_type(liberx_xinput_battery win32cui)
+add_dependencies(liberx_xinput_battery psdk)
+add_importlibs(liberx_xinput_battery msvcrt kernel32)
