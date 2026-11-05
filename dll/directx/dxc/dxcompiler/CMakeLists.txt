@@ -21,4 +21,6 @@ target_include_directories(dxcompiler PRIVATE
     ${REACTOS_SOURCE_DIR}/sdk/lib/3rdparty/vkd3d/include)
 target_link_libraries(dxcompiler vkd3d_shader cpprt uuid)
 add_importlibs(dxcompiler ole32 msvcrt kernel32 ntdll)
-add_cd_file(TARGET dxcompiler DESTINATION reactos/system32 FOR all)
+if(NOT ENABLE_DXCOMPILER_L2)
+    add_cd_file(TARGET dxcompiler DESTINATION reactos/system32 FOR all)
+endif()

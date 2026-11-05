@@ -260,6 +260,10 @@ cmake_dependent_option(ENABLE_DXILCONV
                        "Build dxilconv.dll, the DXBC to DXIL converter of the Direct3D 12 runtime, from the dxc feed" OFF
                        "ARCH STREQUAL i386 OR ARCH STREQUAL amd64 OR ARCH STREQUAL arm64;CMAKE_C_COMPILER_ID STREQUAL Clang;NOT MSVC" OFF)
 
+cmake_dependent_option(ENABLE_DXCOMPILER_L2
+                       "Install the Microsoft DirectX Shader Compiler dxcompiler.dll (HLSL to Shader Model 6 DXIL) built from the dxc feed, instead of the Level 1 compatibility layer" OFF
+                       "ENABLE_DXILCONV" OFF)
+
 set(_wow64_default OFF)
 if((ARCH STREQUAL "amd64" OR ARCH STREQUAL "arm64" OR ARCH STREQUAL "riscv64") AND NOT ARM64EC_RUNTIME)
     set(_wow64_default ON)

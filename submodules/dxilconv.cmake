@@ -62,6 +62,17 @@ set(DXILCONV_SDK_LIBDIR "${DXILCONV_WORK_DIR}/reactos-sdk-lib")
 set(DXILCONV_HOST_DIR "${DXILCONV_WORK_DIR}/host-build")
 set(DXILCONV_BUILD_DIR "${DXILCONV_WORK_DIR}/build")
 set(DXILCONV_BUILD_DLL "${DXILCONV_BUILD_DIR}/bin/dxilconv.dll")
+# Level 2 (ENABLE_DXCOMPILER_L2): the upstream dxcompiler target, the HLSL to DXIL
+# Shader Model 6 compiler with its statically linked open-source validator, comes
+# out of the same nested build. No dxil.dll is built, linked or shipped: the DXIL
+# it produces is validated but unsigned.
+set(_dxilconv_build_targets dxilconv)
+set(_dxilconv_byproducts "${DXILCONV_BUILD_DLL}")
+if(ENABLE_DXCOMPILER_L2)
+    set(DXCOMPILER_L2_BUILD_DLL "${DXILCONV_BUILD_DIR}/bin/dxcompiler.dll")
+    list(APPEND _dxilconv_build_targets dxcompiler)
+    list(APPEND _dxilconv_byproducts "${DXCOMPILER_L2_BUILD_DLL}")
+endif()
 set(DXILCONV_DLL "${DXILCONV_WORK_DIR}/dxilconv.dll")
 set(DXILCONV_LICENSE "${DXILCONV_WORK_DIR}/DirectXShaderCompiler-LICENSE.TXT")
 configure_file("${DXILCONV_SOURCE_DIR}/.clang-format" "${DXILCONV_WORK_DIR}/.clang-format" COPYONLY)
@@ -77,7 +88,8 @@ set(_dxilconv_common_args
     -DHLSL_INCLUDE_TESTS=OFF
     -DLLVM_INCLUDE_TESTS=OFF
     -DCLANG_INCLUDE_TESTS=OFF
-    -DLLVM_ENABLE_ASSERTIONS=OFF)
+    -DLLVM_ENABLE_ASSERTIONS=OFF
+    -DLLVM_PARALLEL_LINK_JOBS=1)
 
 ExternalProject_Add(dxilconv-tablegen
     EXCLUDE_FROM_ALL TRUE
@@ -133,9 +145,9 @@ ExternalProject_Add(dxilconv-build
         -DD3D12_INCLUDE_DIR:PATH=${REACTOS_BINARY_DIR}/sdk/include/psdk
         -DDXGI_INCLUDE_DIR:PATH=${REACTOS_BINARY_DIR}/sdk/include/psdk
     BUILD_COMMAND ${CMAKE_COMMAND} -E env CCACHE_DISABLE=1 SCCACHE_DISABLE=1
-        ${REACTOS_NESTED_BUILD} <BINARY_DIR> --target dxilconv
+        ${REACTOS_NESTED_BUILD} <BINARY_DIR> --target ${_dxilconv_build_targets}
     INSTALL_COMMAND ""
-    BUILD_BYPRODUCTS "${DXILCONV_BUILD_DLL}"
+    BUILD_BYPRODUCTS ${_dxilconv_byproducts}
     USES_TERMINAL_CONFIGURE TRUE
     USES_TERMINAL_BUILD TRUE)
 ExternalProject_Add_StepDependencies(dxilconv-build configure dxilconv_sdk_libs d3d_idl_headers)
@@ -151,3 +163,18 @@ add_custom_target(dxilconv DEPENDS "${DXILCONV_DLL}" "${DXILCONV_LICENSE}")
 add_cd_file(FILE "${DXILCONV_DLL}" TARGET dxilconv DESTINATION reactos/system32 FOR all)
 set_property(GLOBAL APPEND PROPERTY CI_SYSTEM_FILES "${DXILCONV_DLL}")
 add_cd_file(FILE "${DXILCONV_LICENSE}" TARGET dxilconv DESTINATION reactos/3rdParty FOR all)
+
+if(ENABLE_DXCOMPILER_L2)
+    set(DXCOMPILER_L2_DLL "${DXILCONV_WORK_DIR}/dxcompiler.dll")
+    add_custom_command(
+        OUTPUT "${DXCOMPILER_L2_DLL}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DXCOMPILER_L2_BUILD_DLL}" "${DXCOMPILER_L2_DLL}"
+        COMMAND ${DXILCONV_STRIP} --strip-debug "${DXCOMPILER_L2_DLL}"
+        DEPENDS dxilconv-build "${DXCOMPILER_L2_BUILD_DLL}"
+        VERBATIM)
+    add_custom_target(dxcompiler_l2 DEPENDS "${DXCOMPILER_L2_DLL}" "${DXILCONV_LICENSE}")
+    # Replaces the Level 1 dll/directx/dxc/dxcompiler build in reactos/system32 (that
+    # target is still built, as the fallback and the control for the tests).
+    add_cd_file(FILE "${DXCOMPILER_L2_DLL}" TARGET dxcompiler_l2 DESTINATION reactos/system32 FOR all)
+    set_property(GLOBAL APPEND PROPERTY CI_SYSTEM_FILES "${DXCOMPILER_L2_DLL}")
+endif()
