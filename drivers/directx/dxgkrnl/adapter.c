@@ -1483,6 +1483,7 @@ DxgkpStopTdrWatchdog(
  */
 static LONG DxgkpInitialized = 0;
 static NTSTATUS DxgkpInitializationStatus = STATUS_UNSUCCESSFUL;
+static BOOLEAN g_DxgkpLegacyWddm1xEnabled;
 static FAST_MUTEX DxgkpMapMemoryMutex;
 static LIST_ENTRY DxgkpMapMemoryList;
 static FAST_MUTEX DxgkpSleepDisableMutex;
@@ -4261,6 +4262,40 @@ DxgkpEnsureGlobalInitialization(VOID)
 
     /* Initialize debug helpers. */
     DxgkDebugInit();
+
+    {
+        RTL_QUERY_REGISTRY_TABLE QueryTable[2];
+        union { UNICODE_STRING String; ULONG Raw[4]; } Value;
+        WCHAR ValueBuffer[8];
+
+        RtlZeroMemory(&Value, sizeof(Value));
+        RtlZeroMemory(ValueBuffer, sizeof(ValueBuffer));
+        Value.String.Buffer = ValueBuffer;
+        Value.String.MaximumLength = sizeof(ValueBuffer);
+
+        RtlZeroMemory(QueryTable, sizeof(QueryTable));
+        QueryTable[0].Flags = RTL_QUERY_REGISTRY_DIRECT;
+        QueryTable[0].Name = L"LegacyWddm1x";
+        QueryTable[0].EntryContext = &Value;
+        QueryTable[0].DefaultType = REG_SZ;
+        QueryTable[0].DefaultData = L"0";
+        QueryTable[0].DefaultLength = sizeof(L"0");
+
+        (VOID)RtlQueryRegistryValues(RTL_REGISTRY_CONTROL, L"GraphicsDrivers", QueryTable, NULL, NULL);
+
+        /* DIRECT returns REG_SZ as a UNICODE_STRING and REG_DWORD as a raw ULONG.
+         * For a value that exists the UNICODE_STRING points at the stored data;
+         * the local ValueBuffer only backs the default, so test the string
+         * itself and not the spare buffer. */
+        if ((Value.String.Length == sizeof(L"1") - sizeof(WCHAR) &&
+             Value.String.Buffer != NULL && Value.String.Buffer[0] == L'1') ||
+            Value.Raw[0] == 1)
+        {
+            g_DxgkpLegacyWddm1xEnabled = TRUE;
+        }
+        DXGKRNL_INFO("DxgkpEnsureGlobalInitialization: LegacyWddm1x=%d\n",
+                     g_DxgkpLegacyWddm1xEnabled ? 1 : 0);
+    }
 
     Status = DxgkpMms2Initialize();
     if (!NT_SUCCESS(Status))
@@ -7636,7 +7671,12 @@ DxgkpSelectInterfaceAdvertisement(
     _Out_ PULONG AdvertisedSize,
     _Out_ PULONG AdvertisedVersion)
 {
-    if (RequestedVersion <= DXGKDDI_INTERFACE_VERSION_WIN7)
+    if (RequestedVersion <= DXGKDDI_INTERFACE_VERSION_VISTA_SP1)
+    {
+        *AdvertisedSize = DXGKP_FIELD_END(DXGKRNL_INTERFACE, DxgkCbExcludeAdapterAccess);
+        *AdvertisedVersion = RequestedVersion;
+    }
+    else if (RequestedVersion <= DXGKDDI_INTERFACE_VERSION_WIN7)
     {
         *AdvertisedSize = DXGKP_FIELD_END(DXGKRNL_INTERFACE, DxgkCbExcludeAdapterAccess);
         *AdvertisedVersion = DXGKDDI_INTERFACE_VERSION_WIN7;
@@ -17104,13 +17144,27 @@ DxgkpAddDeviceRegistered(
 
     /* Registration already enforces the Win11 profile.  Keep the same floor
      * at AddDevice so a corrupted or stale registration cannot reintroduce a
-     * pre-WDDM 1.2 miniport through the PnP path. */
+     * pre-WDDM 1.2 miniport through the PnP path.  The LegacyWddm1x switch
+     * lifts the floor for exactly the 1.0/1.1 full-table miniports that
+     * registration already admitted. */
     if (!DxgkCapsCoreInterfaceVersionAtLeast(
             MpCtx->InitData.s.Version,
             DXGK_CAPS_CORE_LEVEL_WDDM_1_2))
     {
-        DXGKRNL_WARN("DxgkpAddDevice: pre-WDDM 1.2 miniport version 0x%lX rejected by the Win11 profile\n", MpCtx->InitData.s.Version);
-        return STATUS_NOT_SUPPORTED;
+        ULONG VersionLevel = DxgkCapsCoreInterfaceVersionToLevel(
+            MpCtx->InitData.s.Version);
+        BOOLEAN LegacyAdmit = g_DxgkpLegacyWddm1xEnabled &&
+            !MpCtx->IsDisplayOnlyDriver &&
+            (VersionLevel == DXGK_CAPS_CORE_LEVEL_WDDM_1_0 ||
+             VersionLevel == DXGK_CAPS_CORE_LEVEL_WDDM_1_1);
+
+        if (!LegacyAdmit)
+        {
+            DXGKRNL_WARN("DxgkpAddDevice: pre-WDDM 1.2 miniport version 0x%lX rejected by the Win11 profile\n", MpCtx->InitData.s.Version);
+            return STATUS_NOT_SUPPORTED;
+        }
+        DXGKRNL_INFO("DxgkpAddDevice: LegacyWddm1x admitting pre-WDDM 1.2 miniport version 0x%lX\n",
+                     MpCtx->InitData.s.Version);
     }
 
     /* Create the FDO; size the DeviceExtension to hold DXGKRNL_ADAPTER. */
@@ -17674,6 +17728,17 @@ DxgkpFullInitDataPrefixSize(
     if (DxgkCapsCoreInterfaceVersionAtLeast(
             Version, DXGK_CAPS_CORE_LEVEL_WDDM_1_3))
         return DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiFormatHistoryBuffer);
+    if (DxgkCapsCoreInterfaceVersionAtLeast(
+            Version, DXGK_CAPS_CORE_LEVEL_WDDM_1_2))
+        return DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiNotifySurpriseRemoval);
+    if (DxgkCapsCoreInterfaceVersionAtLeast(
+            Version, DXGK_CAPS_CORE_LEVEL_WDDM_1_1))
+        return DXGKP_FIELD_END(
+            DRIVER_INITIALIZATION_DATA,
+            DxgkDdiSetDisplayPrivateDriverFormat);
+    if (DxgkCapsCoreInterfaceVersionAtLeast(
+            Version, DXGK_CAPS_CORE_LEVEL_WDDM_1_0))
+        return DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiDestroyContext);
     return DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiNotifySurpriseRemoval);
 }
 
@@ -17691,6 +17756,7 @@ DxgkpDodInitDataPrefixSize(
 
 #ifdef _WIN64
 C_ASSERT(DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiSetDisplayPrivateDriverFormat) == 0x1F0);
+C_ASSERT(DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiDestroyContext) == 0x1E0);
 C_ASSERT(DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiQueryVidPnHWCapability) == 0x238);
 C_ASSERT(DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiNotifySurpriseRemoval) == 0x298);
 C_ASSERT(DXGKP_FIELD_END(DRIVER_INITIALIZATION_DATA, DxgkDdiFormatHistoryBuffer) == 0x2C8);
@@ -17892,9 +17958,19 @@ DxgkpInitializeMiniport(
     if (!DxgkCapsCoreInterfaceVersionPermitted(
             Version, REACTOS_WDDM_TARGET_LEVEL))
     {
-        DXGKRNL_ERR("DxgkpInitializeMiniport: DDI selector 0x%lX level %lu is outside the Win11 miniport range %lu..%lu\n",
-                    Version, VersionLevel, (ULONG)DXGK_CAPS_CORE_LEVEL_WDDM_2_0, (ULONG)REACTOS_WDDM_TARGET_LEVEL);
-        return STATUS_REVISION_MISMATCH;
+        BOOLEAN LegacyAdmit = g_DxgkpLegacyWddm1xEnabled &&
+            (VersionLevel == DXGK_CAPS_CORE_LEVEL_WDDM_1_0 ||
+             VersionLevel == DXGK_CAPS_CORE_LEVEL_WDDM_1_1) &&
+            !UseDodLayout;
+
+        if (!LegacyAdmit)
+        {
+            DXGKRNL_ERR("DxgkpInitializeMiniport: DDI selector 0x%lX level %lu is outside the Win11 miniport range %lu..%lu\n",
+                        Version, VersionLevel, (ULONG)DXGK_CAPS_CORE_LEVEL_WDDM_2_0, (ULONG)REACTOS_WDDM_TARGET_LEVEL);
+            return STATUS_REVISION_MISMATCH;
+        }
+        DXGKRNL_INFO("DxgkpInitializeMiniport: LegacyWddm1x admitting DDI 0x%lX level %lu\n",
+                     Version, VersionLevel);
     }
 
     if (UseDodLayout)
