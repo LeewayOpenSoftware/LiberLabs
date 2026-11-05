@@ -4,6 +4,7 @@ list(APPEND SOURCE
     certutil.cpp
     decodehex.cpp
     hashfile.cpp
+    store.cpp
     precomp.h)
 
 add_executable(certutil ${SOURCE})
