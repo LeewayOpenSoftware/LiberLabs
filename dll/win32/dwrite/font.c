@@ -1884,32 +1884,42 @@ static HRESULT WINAPI dwritefontface3_GetRecommendedRenderingMode(IDWriteFontFac
 
 static BOOL WINAPI dwritefontface3_IsCharacterLocal(IDWriteFontFace5 *iface, UINT32 ch)
 {
-    FIXME("%p, %#x: stub\n", iface, ch);
+    TRACE("%p, %#x.\n", iface, ch);
 
-    return FALSE;
+    /* All fonts in this build are installed locally; their data is always present. */
+    return TRUE;
 }
 
 static BOOL WINAPI dwritefontface3_IsGlyphLocal(IDWriteFontFace5 *iface, UINT16 glyph)
 {
-    FIXME("%p, %u: stub\n", iface, glyph);
+    TRACE("%p, %u.\n", iface, glyph);
 
-    return FALSE;
+    return TRUE;
 }
 
 static HRESULT WINAPI dwritefontface3_AreCharactersLocal(IDWriteFontFace5 *iface, WCHAR const *text,
     UINT32 count, BOOL enqueue_if_not, BOOL *are_local)
 {
-    FIXME("%p, %s:%u, %d %p: stub\n", iface, debugstr_wn(text, count), count, enqueue_if_not, are_local);
+    TRACE("%p, %s:%u, %d %p.\n", iface, debugstr_wn(text, count), count, enqueue_if_not, are_local);
 
-    return E_NOTIMPL;
+    if (!text || !are_local)
+        return E_INVALIDARG;
+
+    /* Local fonts: every character's data is already present, nothing to enqueue. */
+    *are_local = TRUE;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontface3_AreGlyphsLocal(IDWriteFontFace5 *iface, UINT16 const *glyphs,
     UINT32 count, BOOL enqueue_if_not, BOOL *are_local)
 {
-    FIXME("%p, %p, %u, %d, %p: stub\n", iface, glyphs, count, enqueue_if_not, are_local);
+    TRACE("%p, %p, %u, %d, %p.\n", iface, glyphs, count, enqueue_if_not, are_local);
 
-    return E_NOTIMPL;
+    if (!glyphs || !are_local)
+        return E_INVALIDARG;
+
+    *are_local = TRUE;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontface4_GetGlyphImageFormats_(IDWriteFontFace5 *iface, UINT16 glyph,
@@ -2188,40 +2198,49 @@ static HRESULT WINAPI dwritefontface_reference_GetFileTime(IDWriteFontFaceRefere
 
 static DWRITE_LOCALITY WINAPI dwritefontface_reference_GetLocality(IDWriteFontFaceReference *iface)
 {
-    FIXME("%p.\n", iface);
+    TRACE("%p.\n", iface);
 
+    /* The referenced font file is installed locally and fully available. */
     return DWRITE_LOCALITY_LOCAL;
 }
 
 static HRESULT WINAPI dwritefontface_reference_EnqueueFontDownloadRequest(IDWriteFontFaceReference *iface)
 {
-    FIXME("%p.\n", iface);
+    TRACE("%p.\n", iface);
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontface_reference_EnqueueCharacterDownloadRequest(IDWriteFontFaceReference *iface,
         WCHAR const *chars, UINT32 count)
 {
-    FIXME("%p, %s, %u.\n", iface, debugstr_wn(chars, count), count);
+    TRACE("%p, %s, %u.\n", iface, debugstr_wn(chars, count), count);
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontface_reference_EnqueueGlyphDownloadRequest(IDWriteFontFaceReference *iface,
         UINT16 const *glyphs, UINT32 count)
 {
-    FIXME("%p, %p, %u.\n", iface, glyphs, count);
+    TRACE("%p, %p, %u.\n", iface, glyphs, count);
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritefontface_reference_EnqueueFileFragmentDownloadRequest(IDWriteFontFaceReference *iface,
         UINT64 offset, UINT64 size)
 {
-    FIXME("%p, 0x%s, 0x%s.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(size));
+    TRACE("%p, 0x%s, 0x%s.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(size));
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static const IDWriteFontFaceReferenceVtbl dwritefontface_reference_vtbl =
@@ -2536,7 +2555,7 @@ static BOOL WINAPI dwritefont3_HasCharacter(IDWriteFont3 *iface, UINT32 ch)
 
 static DWRITE_LOCALITY WINAPI dwritefont3_GetLocality(IDWriteFont3 *iface)
 {
-    FIXME("%p: stub.\n", iface);
+    TRACE("%p.\n", iface);
 
     return DWRITE_LOCALITY_LOCAL;
 }
@@ -6829,40 +6848,48 @@ static HRESULT WINAPI fontfacereference_GetFileTime(IDWriteFontFaceReference1 *i
 
 static DWRITE_LOCALITY WINAPI fontfacereference_GetLocality(IDWriteFontFaceReference1 *iface)
 {
-    FIXME("%p.\n", iface);
+    TRACE("%p.\n", iface);
 
     return DWRITE_LOCALITY_LOCAL;
 }
 
 static HRESULT WINAPI fontfacereference_EnqueueFontDownloadRequest(IDWriteFontFaceReference1 *iface)
 {
-    FIXME("%p.\n", iface);
+    TRACE("%p.\n", iface);
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI fontfacereference_EnqueueCharacterDownloadRequest(IDWriteFontFaceReference1 *iface,
         WCHAR const *chars, UINT32 count)
 {
-    FIXME("%p, %s, %u.\n", iface, debugstr_wn(chars, count), count);
+    TRACE("%p, %s, %u.\n", iface, debugstr_wn(chars, count), count);
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI fontfacereference_EnqueueGlyphDownloadRequest(IDWriteFontFaceReference1 *iface,
         UINT16 const *glyphs, UINT32 count)
 {
-    FIXME("%p, %p, %u.\n", iface, glyphs, count);
+    TRACE("%p, %p, %u.\n", iface, glyphs, count);
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI fontfacereference_EnqueueFileFragmentDownloadRequest(IDWriteFontFaceReference1 *iface,
         UINT64 offset, UINT64 size)
 {
-    FIXME("%p, 0x%s, 0x%s.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(size));
+    TRACE("%p, 0x%s, 0x%s.\n", iface, wine_dbgstr_longlong(offset), wine_dbgstr_longlong(size));
 
-    return E_NOTIMPL;
+    /* The font is already local; there is nothing to download, so the request
+     * completes as a no-op. */
+    return S_OK;
 }
 
 static HRESULT WINAPI fontfacereference1_CreateFontFace(IDWriteFontFaceReference1 *iface, IDWriteFontFace5 **fontface)
