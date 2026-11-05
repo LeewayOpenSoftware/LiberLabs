@@ -663,6 +663,22 @@ static void release_dwritefactory(struct dwritefactory *factory)
     struct collectionloader *loader, *loader2;
     unsigned int i;
 
+    /*
+     * The EUDC collection, the system fallback and the system collections own
+     * font data that references the file loaders and the font face cache, so
+     * they are released first.
+     */
+    if (factory->eudc_collection)
+        IDWriteFontCollection1_Release(factory->eudc_collection);
+    if (factory->fallback)
+        release_system_fontfallback(factory->fallback);
+    for (i = 0; i < ARRAY_SIZE(factory->system_collections); ++i)
+    {
+        if (factory->system_collections[i])
+            IDWriteFontCollection_Release(factory->system_collections[i]);
+    }
+    factory_cleanup_fontset(factory);
+
     EnterCriticalSection(&factory->cs);
     release_fontface_cache(&factory->localfontfaces);
     LeaveCriticalSection(&factory->cs);
@@ -675,17 +691,6 @@ static void release_dwritefactory(struct dwritefactory *factory)
 
     LIST_FOR_EACH_ENTRY_SAFE(fileloader, fileloader2, &factory->file_loaders, struct fileloader, entry)
         release_fileloader(fileloader);
-
-    for (i = 0; i < ARRAY_SIZE(factory->system_collections); ++i)
-    {
-        if (factory->system_collections[i])
-            IDWriteFontCollection_Release(factory->system_collections[i]);
-    }
-    factory_cleanup_fontset(factory);
-    if (factory->eudc_collection)
-        IDWriteFontCollection1_Release(factory->eudc_collection);
-    if (factory->fallback)
-        release_system_fontfallback(factory->fallback);
 
     factory->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&factory->cs);
