@@ -1,0 +1,124 @@
+{
+  "job": "L19-dxc-l2",
+  "lab": "Lab03 (Linux + KVM; worker michael@e2b41d63 / Nimble Parchment)",
+  "approval": {
+    "ownerRequired": true,
+    "approved": true,
+    "reference": "shared/libernt/OWNER-DECISION-DXC-L2-2026-11-05.md (17:46Z): Level 2 authorized; conditions 1-8 mapped below",
+    "window": "stage A anytime (no build); stages B and C in the window god announced (~21:00Z); never interrupt a running critical test"
+  },
+  "description": "DXC Level 2: build the upstream Microsoft DirectX Shader Compiler (tag v1.10.2605.37) as dxcompiler.dll from the dxc feed through LiberX's existing dxilconv machinery, behind ENABLE_DXCOMPILER_L2, then prove on the LiberNT VM that it compiles Shader Model 6.0-6.6 HLSL to DXIL that the open-source validator accepts, while Level 1 stays intact as the fallback and control. Superseding L18-dxc-l2-plan (its source 7c011a8237 is obsolete).",
+  "source": {
+    "repo": "LiberLabs (private exchange) / LiberX (private)",
+    "ref": "refs/heads/src/liberx-item18-dxc-l2  (LiberX branch liberx/item18-dxc-l2)",
+    "sha": "9b328b9fa158102ba0cc8ef5bf2ac32ac13da578",
+    "base": "e15f0fbec505ab9fef5c573cc43f188c6f5305bc (LiberX main after the owner-approved merge-3 push)",
+    "commits": [
+      "238671083 feat(dxc): item 18 DXC Level 1 B0 - dxcompiler.dll COM skeleton            (L1, rebased from liberx/item18-dxc 265f3191c)",
+      "2b70b4b77 feat(dxc): item 18 DXC Level 1 B1 - vkd3d-backed compile/disassemble/validate (L1, rebased from eac90d2f2)",
+      "f0263adb9 test(dxc): item 18 Level 1 differential test suite (liberx_dxc, CPU-only)    (L1, rebased from 22b37f2bc; one trivial CMakeLists.txt subdirectory-list merge)",
+      "671514790 dxc: make the COM implementation classes final and drop an unused test IID    (L1, rebased from d01990b9d; this L1 is what passed L7 9/0/0)",
+      "586599e2d dxc: build the Microsoft dxcompiler.dll (Level 2) from the dxc feed behind ENABLE_DXCOMPILER_L2   (sdk/cmake/config.cmake, submodules/dxilconv.cmake, dll/directx/dxc/dxcompiler/CMakeLists.txt)",
+      "9b328b9fa test(dxc): Shader Model 6 compile, validate and disassemble fixtures (liberx_dxc_sm6)   (tests/liberx-dxc/dxc_sm6.cpp, tests/liberx-dxc/sm6/*)"
+    ],
+    "fetch": "git fetch https://github.com/LeewayOpenSoftware/LiberLabs.git refs/heads/src/liberx-item18-dxc-l2:refs/heads/liberx-item18-dxc-l2 && git checkout 9b328b9fa158102ba0cc8ef5bf2ac32ac13da578",
+    "bundle_fallback": {
+      "file": "liberx-item18-dxc-l2.bundle",
+      "ref_inside": "refs/heads/liberx/item18-dxc-l2",
+      "prerequisite": "a98b7124f887e87ee3b558def419e61ba62a6583 (you have it from L6b)",
+      "commits": 7,
+      "sha256_in": "SHA256SUMS"
+    },
+    "dxc_feed": {
+      "url": "https://github.com/microsoft/DirectXShaderCompiler.git",
+      "tag": "v1.10.2605.37",
+      "commit": "c4d8f4f99aa221da58cd540bf2099a2889632ab6",
+      "checked_out_by": "scripts/feeds update dxc (feeds.conf.default; depth 1; nested submodules external/SPIRV-Headers and external/SPIRV-Tools only)"
+    },
+    "status_honest": "implemented: yes (branch above). compiled: the two test tools pass -fsyntax-only with the real amd64 Clang Debug flags of the tree (0 diagnostics); the cmake change is not compilable on the owner host (no local builds) and is first exercised by stage B. host-tested: the ten HLSL fixtures were run through Microsoft's dxc 1.8.2502.11 on the owner host (7 compile, 3 fail as intended; reference part set SFI0 ISG1 OSG1 PSV0 STAT HASH DXIL). VM-tested: no, that is stage C."
+  },
+  "caps": {
+    "jobs": "-j4 when Lab03 is otherwise idle, else -j2..-j3 (god, 17:48Z); the nested LLVM build inherits the outer -j via sdk/cmake/build-with-parallel.py; nested link jobs = 1 (LLVM_PARALLEL_LINK_JOBS=1 in dxilconv.cmake)",
+    "ram": "8 GB: systemd-run --user --scope -p MemoryMax=8G when available, else ulimit -v 8 GiB per process (stageB.sh)",
+    "nice": 10,
+    "disk": "<= 60 GB total including ccache; stop if the build volume drops under 15 GB free; report du of output-Clang-amd64-debug/submodules/dxilconv (host-build, build) and the feed checkout",
+    "slots": "one Lab03 build slot; no VM boot while the build runs; stage C boots after stage B finished"
+  },
+  "stages": [
+    {
+      "id": "A",
+      "when": "now",
+      "script": "stageA.sh <liberx tree> [out]",
+      "build": false,
+      "what": "fetch the branch (LiberLabs ref or the bundle), check out 9b328b9fa, run scripts/feeds update dxc (tag v1.10.2605.37 depth 1 + the two SPIRV submodules), write MANIFEST-stageA.txt (every LICENSE/COPYING/NOTICE file with its first line, external/ listing, sha256 of LICENSE.TXT and ThirdPartyNotices.txt, tracked binaries, dxil.dll absence + the loader strings, the static dxcvalidator link and the internal-validator calls in dxcutil.cpp, DXCompiler.def exports, patch --check) and PREFLIGHT-stageA.txt (host, tool versions, LiberX SHA, integration-file provenance, free RAM/disk, nproc)",
+      "expected": "feed HEAD == c4d8f4f99aa221da58cd540bf2099a2889632ab6; submodule status shows only the two SPIRV ones; no dxil.dll file anywhere; no tracked .dll/.exe/.lib that would ship; PATCH-CHECK-OK; LICENSE.TXT present (NCSA + Apache-2.0 WITH LLVM-exception per ThirdPartyNotices.txt). Anything else = STOP and report before stage B.",
+      "report_back": "both text files + feeds.log + source.txt"
+    },
+    {
+      "id": "A1",
+      "when": "any time before B (small: no feed, no LLVM; ~minutes)",
+      "script": "launcher-l1.cmd (guest)",
+      "build": true,
+      "what": "Level 1 regression on the REBASED head: ninja -C output-Clang-amd64-debug -j2 -k 0 dxcompiler liberx_dxc (both from 9b328b9fa; no ENABLE_* flags needed), then one VM boot with the L7 layout: dxc\\ = liberx_dxc.exe + the Level 1 dxcompiler.dll app-local, dxc-nodll\\ = liberx_dxc.exe alone, launcher-l1.cmd writes C:\\l6\\com2-L19a.txt",
+      "expected": "step1 'DXC-DIFF-RESULT PASS=9 FAIL=0 SKIP=0' exit 0 (identical to L7 on d01990b9d); step2 control exactly 'DXC-DIFF load FAIL could not LoadLibrary dxcompiler.dll' + 'DXC-DIFF-RESULT PASS=0 FAIL=1 SKIP=0' exit 1; system32 dxcompiler.dll ABSENT. Record sha256 of dxcompiler.dll (Level 1) and liberx_dxc.exe; they should match L7's 1788928-byte / 22016-byte builds only if the toolchain is unchanged, so report, do not gate on the hashes.",
+      "report_back": "com2-L19a.txt in full + build tail + sha256; a FAIL here = STOP before stage B and report"
+    },
+    {
+      "id": "B",
+      "when": "window (~21:00Z)",
+      "script": "stageB.sh <liberx tree> <jobs: 4 idle, else 2..3> [out]",
+      "build": true,
+      "what": "cmake -DENABLE_DXILCONV=ON -DENABLE_DXCOMPILER_L2=ON output-Clang-amd64-debug; ninja -j2 dxcompiler_l2 under the caps with /usr/bin/time -v (host tablegen build, then the cross build of dxilconv + dxcompiler, strip, LICENSE.TXT copy); products.txt with sha256, exports and imports of dxcompiler.dll; then ninja liberx_dxc liberx_dxc_sm6 dxcompiler (Level 1 control); then best-effort ninja dxc in the nested build dir (dxc.exe)",
+      "milestones": "report to god at: configure done; nested build 25/50/75 % ([n/N] lines); link of dxcompiler.dll started; strip/copy done; tests built. Include elapsed and RSS so far.",
+      "expected": "build rc=0; exports exactly DxcCreateInstance and DxcCreateInstance2; imports are system DLLs only, no dxil.dll; dxcompiler.dll present stripped under output-Clang-amd64-debug/submodules/dxilconv/; LICENSE copied; Level 1 dxcompiler.dll and both test exes build with 0 errors. Warnings counted, not gated. dxc.exe may fail to build (report, not gated).",
+      "record": "start/end UTC, Elapsed, Maximum resident set size, User/System time, du of the nested build dirs, disk before/after, warnings/errors count, every sha256 (condition 7)",
+      "report_back": "configure.log, build.log tail (last 60 lines) + full file, time.txt, resources.txt, products.txt, tests-build.log, dxc-exe.log"
+    },
+    {
+      "id": "C",
+      "when": "after B, same window",
+      "script": "launcher.cmd (guest) + check_dxil.py (host)",
+      "build": false,
+      "image": "same as L6b/L7: COPY of LDW run 41858171199 artifact LiberNT-img-clang-amd64-36a28891bae; KVM -M pc -cpu max -smp 2 -m 1024, OVMF, IDE overlay, offline, payload read-only vvfat D:; fresh overlay; Startup-folder hook starts D:\\launcher.cmd",
+      "payload_layout": {
+        "launcher.cmd": "this folder's launcher.cmd",
+        "l2\\dxcompiler.dll": "the STRIPPED Level 2 product output-Clang-amd64-debug/submodules/dxilconv/dxcompiler.dll",
+        "l2\\liberx_dxc_sm6.exe": "output-Clang-amd64-debug/tests/liberx-dxc/liberx_dxc_sm6.exe",
+        "l2\\liberx_dxc.exe": "output-Clang-amd64-debug/tests/liberx-dxc/liberx_dxc.exe",
+        "l2\\sm6\\": "the whole tests/liberx-dxc/sm6/ directory from the source tree (CASES.txt + 10 .hlsl)",
+        "l2\\dxc.exe": "output-Clang-amd64-debug/submodules/dxilconv/build/bin/dxc.exe if stage B produced it (optional)",
+        "l1\\dxcompiler.dll": "output-Clang-amd64-debug/dll/directx/dxc/dxcompiler/dxcompiler.dll (Level 1)",
+        "l1\\liberx_dxc.exe": "same exe as l2\\"
+      },
+      "steps": [
+        "step1 l2: liberx_dxc_sm6.exe D:\\l2\\sm6 C:\\l6\\dxil  -> GATE: 'DXC-SM6-RESULT PASS=45 FAIL=0 SKIP=0', exit 0. (4 setup checks + 7 positives x read/compile/container/validate/disassemble + 3 negatives x read/compile.) Each positive line '<case>.container' must say 'hash=zero(unsigned)' (no dxil.dll signing) and list a DXIL part; '<case>.validate' status=0x00000000; '<case>.disassemble' has_define=1.",
+        "step2 l2: liberx_dxc.exe (the Level 1 suite against Level 2) -> RECORD all 9 lines, not gated. Expected differences from L1: compile.ps_5_0.dxbc may FAIL (upstream dxc does not produce DXBC) and compile.ps_6_0.refused WILL FAIL (Level 2 compiles ps_6_0 instead of refusing it). entry/create/utils/disassemble/validate lines expected PASS.",
+        "step3 l1: liberx_dxc.exe with the Level 1 DLL -> GATE: 'DXC-DIFF-RESULT PASS=9 FAIL=0 SKIP=0', exit 0 (condition 3: Level 1 intact).",
+        "step4 l2: dxc.exe -T cs_6_0 cs60_basic.hlsl -Fo C:\\l6\\dxil\\cli_cs60_basic.dxil -> best effort, recorded.",
+        "system32 check: dxil.dll ABSENT, dxcompiler.dll ABSENT (the image has no DXC), ole32/ucrtbase/msvcrt PRESENT.",
+        "host: copy C:\\l6\\ from the overlay; python3 -I check_dxil.py <dir>/dxil -> GATE: 'DXIL-CHECK-RESULT files>=7 fail=0' (kind, SM 6.0/6.2/6.5/6.6 per fixture, DXIL program header, bitcode magic; parts compared with the Microsoft reference set).",
+        "COM1: record any 'Exception' or bugcheck line during the window; a crash of liberx_dxc_sm6 = FAIL."
+      ],
+      "expected": "GATES: step1 45/0/0, step3 9/0/0, DXIL-CHECK fail=0, no crash/hang. Everything else recorded verbatim.",
+      "report_back": "C:\\l6\\com2-L19.txt in full, the .dxil and .ll files (tar), check_dxil output, com1.log of the boot, sha256 of every payload file"
+    },
+    {
+      "id": "D",
+      "when": "with C",
+      "build": false,
+      "what": "Integration evidence for the owner: the isolated branch liberx/item18-dxc-l2 (6 commits on main e15f0fbec, Leeway Open Software, no push to main) holds Level 2 behind ENABLE_DXCOMPILER_L2 (default OFF; dependent on ENABLE_DXILCONV) with Level 1 unchanged and still built; the VM run above is the Level 2 validation (condition 5) and the Level 1 control (condition 3). Dwight writes DXC-L2-RESULTS.md from the stage A-C reports and states integration readiness; the owner decides any push (condition 8).",
+      "not_claimed": "no GPU execution, no D3D12 feature-level claim from DXC alone (condition 6); DXIL is unsigned (no dxil.dll, neither proprietary nor the upstream dxildll target); dxc.exe CLI is best effort"
+    }
+  ],
+  "owner_conditions_map": {
+    "1_coordinate_lab03": "stage A no-build anytime; B/C only in the announced window; milestones to god",
+    "2_caps": "see caps (nice 10, 8 GB, -j2, link jobs 1, disk budget)",
+    "3_level1_intact": "L1 still built; gate default OFF; step3 control 9/0/0",
+    "4_no_proprietary": "stage A manifest: no dxil.dll, no tracked binaries shipped, NCSA/Apache-2.0-LLVM-exception/MIT notices kept; LICENSE.TXT to reactos/3rdParty",
+    "5_valid_sm6": "step1 validate PASS per fixture (internal validator), check_dxil per container",
+    "6_no_d3d12_claim": "stated in D",
+    "7_logging": "stage B start/end, time -v, du, df, sha256; stage C full outputs",
+    "8_isolated_branch": "liberx/item18-dxc-l2 only; nothing pushed to main"
+  },
+  "do_not": "no push to LiberX main, LiberNT-LDW or anywhere; no source edits (report instead); no build outside the window or above the caps; do not interrupt running tests; no dxil.dll from any source."
+}
