@@ -26,7 +26,7 @@ refs/heads/src/<branch>         one ref per internal LiberNT or LiberX branch, a
 | `src/crypt32-authroot` | `48e2f2c5d7831cfb89860f912906136fa1f20f70` | Stanley, crypt32 V2 + AuthRoot (contains e812612c, 97bd20bf) |
 | `src/ncsc-1` | `6d053c0ac78d90e88bd8232b5b6d0c480a9b55b8` | Pam, Network and Sharing Center |
 | `src/net-m1-stats` | `1b5e6b8dd053df830740517c7186525eae262f6b` | Ryan, networking M1 stats |
-| `src/liberx-merge-3` | `2047d944c05c17bf057e785fe0c0a81ed3ac97d2` | LiberX (separate history, private): merge-3 integrated tree (items 1, 7, 5, 6b, 6, 8, contract-findings) on LiberX main 2627bc87c |
+| `src/liberx-merge-3` | `a98b7124f887e87ee3b558def419e61ba62a6583` | LiberX (separate history, private): merge-3 integrated tree (items 1, 7, 5, 6b, 6, 8, contract-findings) on LiberX main 2627bc87c, + 3 fixes after Lab03 run L6 (d3d12 NULL-out entry, two fixture corrections) |
 | `src/liberx-item18-dxc` | `d01990b9d364d8cd5b1b5295f48e75942f2fb793` | LiberX item 18 DXC Level 1 (dxcompiler + liberx_dxc), 4 commits on 2627bc87c |
 
 (The table is maintained by hand when a ref is pushed; `git ls-remote --heads` is authoritative.)
