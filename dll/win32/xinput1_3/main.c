@@ -1122,15 +1122,27 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetCapabilities(DWORD index, DWORD flags, X
 
 DWORD WINAPI DECLSPEC_HOTPATCH XInputGetDSoundAudioDeviceGuids(DWORD index, GUID *render_guid, GUID *capture_guid)
 {
-    DWORD ret;
+    DWORD ret = ERROR_SUCCESS;
 
-    FIXME("index %lu, render_guid %s, capture_guid %s stub!\n", index, debugstr_guid(render_guid),
-          debugstr_guid(capture_guid));
+    TRACE("index %lu, render_guid %p, capture_guid %p.\n", index, render_guid, capture_guid);
 
     if (index >= XUSER_MAX_COUNT || !render_guid || !capture_guid) return ERROR_BAD_ARGUMENTS;
 
+    start_update_thread();
+
     EnterCriticalSection(&xinput_cs);
-    ret = controllers[index].device ? ERROR_NOT_SUPPORTED : ERROR_DEVICE_NOT_CONNECTED;
+    if (!controllers[index].device) update_controller_list();
+    if (!controllers[index].device)
+        ret = ERROR_DEVICE_NOT_CONNECTED;
+    else
+    {
+        /* The HID backend exposes no DirectSound audio endpoint for the pad.
+         * The documented "no associated audio device" result is GUID_NULL on
+         * both endpoints with ERROR_SUCCESS; this API is deprecated and its
+         * modern replacement is XInputGetAudioDeviceIds. */
+        memset(render_guid, 0, sizeof(*render_guid));
+        memset(capture_guid, 0, sizeof(*capture_guid));
+    }
     LeaveCriticalSection(&xinput_cs);
 
     return ret;
@@ -1138,15 +1150,44 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetDSoundAudioDeviceGuids(DWORD index, GUID
 
 DWORD WINAPI DECLSPEC_HOTPATCH XInputGetBatteryInformation(DWORD index, BYTE type, XINPUT_BATTERY_INFORMATION* battery)
 {
-    static int once;
-    DWORD ret;
+    DWORD ret = ERROR_SUCCESS;
 
-    if (!once++) FIXME("index %lu, type %u, battery %p.\n", index, type, battery);
+    TRACE("index %lu, type %u, battery %p.\n", index, type, battery);
 
-    if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
+    if (index >= XUSER_MAX_COUNT || !battery) return ERROR_BAD_ARGUMENTS;
+    if (type != BATTERY_DEVTYPE_GAMEPAD && type != BATTERY_DEVTYPE_HEADSET)
+        return ERROR_BAD_ARGUMENTS;
+
+    start_update_thread();
 
     EnterCriticalSection(&xinput_cs);
-    ret = controllers[index].device ? ERROR_NOT_SUPPORTED : ERROR_DEVICE_NOT_CONNECTED;
+    if (!controllers[index].device) update_controller_list();
+    if (!controllers[index].device)
+    {
+        battery->BatteryType = BATTERY_TYPE_DISCONNECTED;
+        battery->BatteryLevel = BATTERY_LEVEL_EMPTY;
+        ret = ERROR_DEVICE_NOT_CONNECTED;
+    }
+    else if (type == BATTERY_DEVTYPE_HEADSET)
+    {
+        /* The HID backend exposes no headset audio endpoint for the pad. */
+        battery->BatteryType = BATTERY_TYPE_DISCONNECTED;
+        battery->BatteryLevel = BATTERY_LEVEL_EMPTY;
+    }
+    else if (controllers[index].caps.Flags & XINPUT_CAPS_WIRELESS)
+    {
+        /* Wireless pad: the HID battery usage page is not read yet, so the
+         * charge level is genuinely unknown rather than fabricated. */
+        battery->BatteryType = BATTERY_TYPE_UNKNOWN;
+        battery->BatteryLevel = BATTERY_LEVEL_FULL;
+    }
+    else
+    {
+        /* Wired controller: it has no battery, which the documented contract
+         * reports as BATTERY_TYPE_WIRED at BATTERY_LEVEL_FULL. */
+        battery->BatteryType = BATTERY_TYPE_WIRED;
+        battery->BatteryLevel = BATTERY_LEVEL_FULL;
+    }
     LeaveCriticalSection(&xinput_cs);
 
     return ret;
