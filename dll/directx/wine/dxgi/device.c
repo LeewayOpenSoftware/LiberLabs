@@ -246,10 +246,24 @@ fail:
 static HRESULT STDMETHODCALLTYPE dxgi_device_QueryResourceResidency(IWineDXGIDevice *iface,
         IUnknown *const *resources, DXGI_RESIDENCY *residency, UINT resource_count)
 {
-    FIXME("iface %p, resources %p, residency %p, resource_count %u stub!\n",
+    UINT i;
+
+    TRACE("iface %p, resources %p, residency %p, resource_count %u.\n",
             iface, resources, residency, resource_count);
 
-    return E_NOTIMPL;
+    if (!resources || !residency)
+        return E_INVALIDARG;
+
+    for (i = 0; i < resource_count; ++i)
+    {
+        if (!resources[i])
+            return E_INVALIDARG;
+        /* The software path keeps every resource in system memory and never
+         * evicts, so each one is fully resident. */
+        residency[i] = DXGI_RESIDENCY_FULLY_RESIDENT;
+    }
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_SetGPUThreadPriority(IWineDXGIDevice *iface, INT priority)
@@ -320,19 +334,49 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_GetMaximumFrameLatency(IWineDXGIDev
 static HRESULT STDMETHODCALLTYPE dxgi_device_OfferResources(IWineDXGIDevice *iface, UINT resource_count,
         IDXGIResource * const *resources, DXGI_OFFER_RESOURCE_PRIORITY priority)
 {
-    FIXME("iface %p, resource_count %u, resources %p, priority %u stub!\n", iface, resource_count,
+    UINT i;
+
+    TRACE("iface %p, resource_count %u, resources %p, priority %u.\n", iface, resource_count,
         resources, priority);
 
-    return E_NOTIMPL;
+    if (!resources)
+        return E_INVALIDARG;
+    if (priority < DXGI_OFFER_RESOURCE_PRIORITY_LOW || priority > DXGI_OFFER_RESOURCE_PRIORITY_HIGH)
+        return E_INVALIDARG;
+
+    for (i = 0; i < resource_count; ++i)
+    {
+        if (!resources[i])
+            return E_INVALIDARG;
+    }
+
+    /* Offering lets the app say the content may be discarded under memory
+     * pressure. The software path never discards, so the offer is accepted and
+     * the content is retained; ReclaimResources will report it was not lost. */
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_ReclaimResources(IWineDXGIDevice *iface, UINT resource_count,
         IDXGIResource * const *resources, BOOL *discarded)
 {
-    FIXME("iface %p, resource_count %u, resources %p, discarded %p stub!\n", iface, resource_count,
+    UINT i;
+
+    TRACE("iface %p, resource_count %u, resources %p, discarded %p.\n", iface, resource_count,
         resources, discarded);
 
-    return E_NOTIMPL;
+    if (!resources)
+        return E_INVALIDARG;
+
+    for (i = 0; i < resource_count; ++i)
+    {
+        if (!resources[i])
+            return E_INVALIDARG;
+        /* The software path never discarded the offered content. */
+        if (discarded)
+            discarded[i] = FALSE;
+    }
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_EnqueueSetEvent(IWineDXGIDevice *iface, HANDLE event)
