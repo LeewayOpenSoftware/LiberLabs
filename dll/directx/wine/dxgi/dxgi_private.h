@@ -154,6 +154,7 @@ struct dxgi_device
     struct wined3d_swapchain *implicit_swapchain;
     IWineDXGIAdapter *adapter;
     UINT max_frame_latency;
+    INT gpu_thread_priority;
 };
 
 HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *layer,
