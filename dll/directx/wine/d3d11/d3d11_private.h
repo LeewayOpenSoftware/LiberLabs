@@ -599,6 +599,7 @@ struct d3d_device
     SIZE_T context_states_size;
     SIZE_T context_state_count;
     UINT exception_mode;
+    UINT create_flags;
 #ifdef __REACTOS__
     IUnknown *on12;
 #endif

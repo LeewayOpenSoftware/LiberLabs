@@ -43,3 +43,8 @@ add_executable(liberx_d3d10_profile d3d10-profile.c)
 set_module_type(liberx_d3d10_profile win32cui)
 add_dependencies(liberx_d3d10_profile psdk)
 add_importlibs(liberx_d3d10_profile msvcrt kernel32)
+
+add_executable(liberx_d3d11_creationflags d3d11-creationflags.c)
+set_module_type(liberx_d3d11_creationflags win32cui)
+add_dependencies(liberx_d3d11_creationflags psdk)
+add_importlibs(liberx_d3d11_creationflags msvcrt kernel32 d3d11)

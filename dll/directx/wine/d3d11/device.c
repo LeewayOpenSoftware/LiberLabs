@@ -5292,9 +5292,13 @@ static D3D_FEATURE_LEVEL STDMETHODCALLTYPE d3d11_device_GetFeatureLevel(ID3D11De
 
 static UINT STDMETHODCALLTYPE d3d11_device_GetCreationFlags(ID3D11Device5 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d3d_device *device = impl_from_ID3D11Device5(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    /* The flags are captured once in D3D11CoreCreateDevice and never change;
+     * returned verbatim as Windows does. */
+    return device->create_flags;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_GetDeviceRemovedReason(ID3D11Device5 *iface)

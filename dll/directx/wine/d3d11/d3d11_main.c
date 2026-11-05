@@ -147,6 +147,12 @@ HRESULT WINAPI D3D11CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapte
         return E_FAIL;
     }
     d3d_device->d3d11_only = TRUE;
+    /* ID3D11Device::GetCreationFlags returns the flags the app created with.
+     * Windows returns them verbatim; the D3D11_CREATE_DEVICE_DEBUG case is
+     * handled at creation (d3d11_create_device fails with
+     * DXGI_ERROR_SDK_COMPONENT_MISSING when the SDK layer is absent), so a
+     * device created through the public API never carries it. */
+    d3d_device->create_flags = flags;
 
     return S_OK;
 }
