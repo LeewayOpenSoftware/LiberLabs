@@ -1873,7 +1873,10 @@ static HRESULT vkd3d_init_device_caps(struct d3d12_device *device,
 
     device->feature_options3.CopyQueueTimestampQueriesSupported = FALSE;
     device->feature_options3.CastingFullyTypedFormatSupported = FALSE;
-    device->feature_options3.WriteBufferImmediateSupportFlags = D3D12_COMMAND_LIST_SUPPORT_FLAG_NONE;
+    /* d3d12_command_list_WriteBufferImmediate() records a buffer fill, which every
+     * queue type can execute; bundles may not record it. */
+    device->feature_options3.WriteBufferImmediateSupportFlags = D3D12_COMMAND_LIST_SUPPORT_FLAG_DIRECT
+            | D3D12_COMMAND_LIST_SUPPORT_FLAG_COMPUTE | D3D12_COMMAND_LIST_SUPPORT_FLAG_COPY;
     device->feature_options3.ViewInstancingTier = D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED;
     device->feature_options3.BarycentricsSupported = FALSE;
 

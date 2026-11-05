@@ -7431,6 +7431,9 @@ static void STDMETHODCALLTYPE d3d12_command_list_WriteBufferImmediate(ID3D12Grap
 
     TRACE("iface %p, count %u, parameters %p, modes %p.\n", iface, count, parameters, modes);
 
+    if (d3d12_command_list_reject_in_bundle(iface))
+        return;
+
     for (i = 0; modes && i < count; ++i)
     {
         if (modes[i] != D3D12_WRITEBUFFERIMMEDIATE_MODE_DEFAULT && modes[i] != D3D12_WRITEBUFFERIMMEDIATE_MODE_MARKER_IN
