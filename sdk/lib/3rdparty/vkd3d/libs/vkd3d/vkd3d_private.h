@@ -136,6 +136,7 @@ struct vkd3d_vulkan_info
     bool EXT_4444_formats;
     bool EXT_calibrated_timestamps;
     bool EXT_conditional_rendering;
+    bool EXT_conservative_rasterization;
     bool EXT_custom_border_color;
     bool EXT_debug_marker;
     bool EXT_depth_range_unrestricted;
@@ -1071,6 +1072,7 @@ struct d3d12_graphics_pipeline_state
     VkSampleMask sample_mask[2];
     VkPipelineRasterizationDepthClipStateCreateInfoEXT rs_depth_clip_info;
     VkPipelineRasterizationStateStreamCreateInfoEXT rs_stream_info;
+    VkPipelineRasterizationConservativeStateCreateInfoEXT rs_conservative_info;
 
     const struct d3d12_root_signature *root_signature;
 

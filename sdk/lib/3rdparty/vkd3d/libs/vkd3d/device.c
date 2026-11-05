@@ -102,6 +102,7 @@ static const struct vkd3d_optional_extension_info optional_device_extensions[] =
     VK_EXTENSION(EXT_4444_FORMATS, EXT_4444_formats),
     VK_EXTENSION(EXT_CALIBRATED_TIMESTAMPS, EXT_calibrated_timestamps),
     VK_EXTENSION(EXT_CONDITIONAL_RENDERING, EXT_conditional_rendering),
+    VK_EXTENSION(EXT_CONSERVATIVE_RASTERIZATION, EXT_conservative_rasterization),
     VK_EXTENSION(EXT_CUSTOM_BORDER_COLOR, EXT_custom_border_color),
     VK_DEBUG_EXTENSION(EXT_DEBUG_MARKER, EXT_debug_marker),
     VK_EXTENSION(EXT_DEPTH_RANGE_UNRESTRICTED, EXT_depth_range_unrestricted),
@@ -837,6 +838,7 @@ static bool d3d12_device_environment_is_vulkan_min_1_1(struct d3d12_device *devi
 struct vkd3d_physical_device_info
 {
     /* properties */
+    VkPhysicalDeviceConservativeRasterizationPropertiesEXT conservative_rasterization_properties;
     VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptor_indexing_properties;
     VkPhysicalDeviceMaintenance3Properties maintenance3_properties;
     VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT filter_minmax_properties;
@@ -912,6 +914,8 @@ static void vkd3d_chain_physical_device_info_structures(struct vkd3d_physical_de
 
     if (vulkan_info->KHR_maintenance3)
         vk_prepend_struct(&info->properties2, &info->maintenance3_properties);
+    if (vulkan_info->EXT_conservative_rasterization)
+        vk_prepend_struct(&info->properties2, &info->conservative_rasterization_properties);
     if (vulkan_info->EXT_descriptor_indexing)
         vk_prepend_struct(&info->properties2, &info->descriptor_indexing_properties);
     if (vulkan_info->EXT_sampler_filter_minmax)
@@ -954,6 +958,7 @@ static void vkd3d_physical_device_info_init(struct vkd3d_physical_device_info *i
 
     info->properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     info->maintenance3_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
+    info->conservative_rasterization_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONSERVATIVE_RASTERIZATION_PROPERTIES_EXT;
     info->descriptor_indexing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT;
     info->filter_minmax_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES_EXT;
     info->texel_buffer_alignment_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_PROPERTIES_EXT;
@@ -1740,6 +1745,22 @@ static void vkd3d_override_caps(struct d3d12_device *device)
     }
 }
 
+/* D3D12 tier 1 overestimates within 1/2 pixel; tier 2 within 1/256 pixel and
+ * rasterizes post-snap degenerate triangles; tier 3 adds SV_InnerCoverage, which
+ * the SPIR-V backend does not emit (FullyCoveredEXT), so tier 2 is the ceiling. */
+static D3D12_CONSERVATIVE_RASTERIZATION_TIER vkd3d_conservative_rasterization_tier(
+        const struct vkd3d_vulkan_info *vulkan_info,
+        const VkPhysicalDeviceConservativeRasterizationPropertiesEXT *properties)
+{
+    if (!vulkan_info->EXT_conservative_rasterization)
+        return D3D12_CONSERVATIVE_RASTERIZATION_TIER_NOT_SUPPORTED;
+    if (properties->primitiveOverestimationSize > 0.5f)
+        return D3D12_CONSERVATIVE_RASTERIZATION_TIER_NOT_SUPPORTED;
+    if (properties->primitiveOverestimationSize <= 1.0f / 256.0f && properties->degenerateTrianglesRasterized)
+        return D3D12_CONSERVATIVE_RASTERIZATION_TIER_2;
+    return D3D12_CONSERVATIVE_RASTERIZATION_TIER_1;
+}
+
 static HRESULT vkd3d_init_device_caps(struct d3d12_device *device,
         const struct vkd3d_device_create_info *create_info,
         struct vkd3d_physical_device_info *physical_device_info,
@@ -1826,8 +1847,10 @@ static HRESULT vkd3d_init_device_caps(struct d3d12_device *device,
 
     device->feature_options.TypedUAVLoadAdditionalFormats = features->shaderStorageImageReadWithoutFormat
             && d3d12_device_supports_typed_uav_load_additional_formats(device);
-    /* GL_INTEL_conservative_rasterization, no Vulkan equivalent. */
-    device->feature_options.ConservativeRasterizationTier = D3D12_CONSERVATIVE_RASTERIZATION_TIER_NOT_SUPPORTED;
+    device->feature_options.ConservativeRasterizationTier = vkd3d_conservative_rasterization_tier(vulkan_info,
+            &physical_device_info->conservative_rasterization_properties);
+    if (device->feature_options.ConservativeRasterizationTier == D3D12_CONSERVATIVE_RASTERIZATION_TIER_NOT_SUPPORTED)
+        vulkan_info->EXT_conservative_rasterization = false;
     device->feature_options.MaxGPUVirtualAddressBitsPerResource = 40; /* FIXME */
     device->feature_options.StandardSwizzle64KBSupported = FALSE;
     device->feature_options.CrossNodeSharingTier = D3D12_CROSS_NODE_SHARING_TIER_NOT_SUPPORTED;

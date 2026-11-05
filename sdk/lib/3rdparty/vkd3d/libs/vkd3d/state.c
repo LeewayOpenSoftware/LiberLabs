@@ -3263,8 +3263,6 @@ static void rs_desc_from_d3d12(VkPipelineRasterizationStateCreateInfo *vk_desc,
         FIXME_ONCE("Ignoring AntialiasedLineEnable %#x.\n", d3d12_desc->AntialiasedLineEnable);
     if (d3d12_desc->ForcedSampleCount)
         FIXME("Ignoring ForcedSampleCount %#x.\n", d3d12_desc->ForcedSampleCount);
-    if (d3d12_desc->ConservativeRaster)
-        FIXME("Ignoring ConservativeRaster %#x.\n", d3d12_desc->ConservativeRaster);
 }
 
 static void rs_depth_clip_info_from_d3d12(VkPipelineRasterizationDepthClipStateCreateInfoEXT *depth_clip_info,
@@ -3278,6 +3276,19 @@ static void rs_depth_clip_info_from_d3d12(VkPipelineRasterizationDepthClipStateC
     depth_clip_info->depthClipEnable = d3d12_desc->DepthClipEnable;
 
     vk_prepend_struct(vk_rs_desc, depth_clip_info);
+}
+
+static void rs_conservative_info_from_d3d12(VkPipelineRasterizationConservativeStateCreateInfoEXT *conservative_info,
+        VkPipelineRasterizationStateCreateInfo *vk_rs_desc)
+{
+    conservative_info->sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT;
+    conservative_info->pNext = NULL;
+    conservative_info->flags = 0;
+    /* D3D12 conservative rasterization is overestimation without extra dilation. */
+    conservative_info->conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+    conservative_info->extraPrimitiveOverestimationSize = 0.0f;
+
+    vk_prepend_struct(vk_rs_desc, conservative_info);
 }
 
 static void rs_stream_info_from_d3d12(VkPipelineRasterizationStateStreamCreateInfoEXT *stream_info,
@@ -4148,6 +4159,22 @@ static HRESULT d3d12_pipeline_state_init_graphics(struct d3d12_pipeline_state *s
 
     is_dsv_format_unknown = graphics->null_attachment_mask & dsv_attachment_mask(graphics);
 
+    if (desc->rasterizer_state.ConservativeRaster != D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF)
+    {
+        if (desc->rasterizer_state.ConservativeRaster != D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON)
+        {
+            WARN("Invalid conservative rasterization mode %#x.\n", desc->rasterizer_state.ConservativeRaster);
+            hr = E_INVALIDARG;
+            goto fail;
+        }
+        if (device->feature_options.ConservativeRasterizationTier == D3D12_CONSERVATIVE_RASTERIZATION_TIER_NOT_SUPPORTED)
+        {
+            WARN("Conservative rasterization is not supported by the Vulkan implementation.\n");
+            hr = E_INVALIDARG;
+            goto fail;
+        }
+    }
+
     rs_desc_from_d3d12(&graphics->rs_desc, &desc->rasterizer_state);
     if (desc->float_depth_bias)
         graphics->rs_desc.depthBiasConstantFactor = desc->depth_bias;
@@ -4159,6 +4186,8 @@ static HRESULT d3d12_pipeline_state_init_graphics(struct d3d12_pipeline_state *s
     rs_stream_info_from_d3d12(&graphics->rs_stream_info, &graphics->rs_desc, so_desc, vk_info);
     if (vk_info->EXT_depth_clip_enable)
         rs_depth_clip_info_from_d3d12(&graphics->rs_depth_clip_info, &graphics->rs_desc, &desc->rasterizer_state);
+    if (desc->rasterizer_state.ConservativeRaster == D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON)
+        rs_conservative_info_from_d3d12(&graphics->rs_conservative_info, &graphics->rs_desc);
 
     graphics->ms_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     graphics->ms_desc.pNext = NULL;
