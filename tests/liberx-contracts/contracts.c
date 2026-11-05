@@ -21,6 +21,11 @@ DEFINE_GUID(iid_d2d_factory, 0x06152247, 0x6f50, 0x465a, 0x92, 0x45, 0x11, 0x8b,
 DEFINE_GUID(iid_d3d12_device, 0x189819f1, 0x1db6, 0x4b57, 0xbe, 0x54, 0x18, 0x21, 0x33, 0x9b, 0x85, 0xf7);
 DEFINE_GUID(iid_d3d12_root_signature, 0xc54a6b66, 0x72df, 0x4ee8, 0x8b, 0xe5, 0xa9, 0x46, 0xa1, 0x42, 0x92, 0x14);
 DEFINE_GUID(iid_d3d12_pipeline_state, 0x765a30f3, 0xf624, 0x4c6f, 0xa8, 0x28, 0xac, 0xe9, 0x48, 0x62, 0x24, 0x45);
+DEFINE_GUID(iid_d3d12_command_queue, 0x0ec870a6, 0x5d7e, 0x4c22, 0x8c, 0xfc, 0x5b, 0xaa, 0xe0, 0x76, 0x16, 0xed);
+DEFINE_GUID(iid_d3d12_command_allocator, 0x6102dee4, 0xaf59, 0x4b09, 0xb9, 0x99, 0xb4, 0x4d, 0x73, 0xf0, 0x9b, 0x24);
+DEFINE_GUID(iid_d3d12_graphics_command_list2, 0x38c3e585, 0xff17, 0x412c, 0x91, 0x50, 0x4f, 0xc6, 0xf9, 0xd7, 0x2a, 0x28);
+DEFINE_GUID(iid_d3d12_resource, 0x696442be, 0xa72e, 0x4059, 0xbc, 0x79, 0x5b, 0x5c, 0x98, 0x04, 0x0f, 0xad);
+DEFINE_GUID(iid_d3d12_fence, 0x0a753dcf, 0xc4d8, 0x4b91, 0xad, 0xf6, 0xbe, 0x5a, 0x60, 0xd9, 0x5a, 0x76);
 DEFINE_GUID(iid_unknown_probe, 0x5b7a1c1e, 0x9d3a, 0x4a52, 0x8f, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66);
 
 #define ASSERT_SLOT(name, vtbl, member, index) \
@@ -332,6 +337,130 @@ done:
         FreeLibrary(compiler);
 }
 
+/* WriteBufferImmediate: the OPTIONS3 flags must describe what the command list
+ * really does. Positive: two DWORDs written through a direct list land in a
+ * readback buffer. Negative: an invalid mode invalidates the list, so Close
+ * fails. Bundles are not advertised. */
+static void test_d3d12_write_buffer_immediate(ID3D12Device *device)
+{
+    static const D3D12_COMMAND_LIST_SUPPORT_FLAGS defined = D3D12_COMMAND_LIST_SUPPORT_FLAG_DIRECT
+            | D3D12_COMMAND_LIST_SUPPORT_FLAG_BUNDLE | D3D12_COMMAND_LIST_SUPPORT_FLAG_COMPUTE
+            | D3D12_COMMAND_LIST_SUPPORT_FLAG_COPY | D3D12_COMMAND_LIST_SUPPORT_FLAG_VIDEO_DECODE
+            | D3D12_COMMAND_LIST_SUPPORT_FLAG_VIDEO_PROCESS | D3D12_COMMAND_LIST_SUPPORT_FLAG_VIDEO_ENCODE;
+    D3D12_WRITEBUFFERIMMEDIATE_MODE bad_mode = (D3D12_WRITEBUFFERIMMEDIATE_MODE)0x7;
+    D3D12_WRITEBUFFERIMMEDIATE_PARAMETER params[2];
+    D3D12_FEATURE_DATA_D3D12_OPTIONS3 options3;
+    ID3D12GraphicsCommandList2 *list = NULL;
+    ID3D12CommandAllocator *allocator = NULL;
+    D3D12_COMMAND_QUEUE_DESC queue_desc;
+    ID3D12CommandQueue *queue = NULL;
+    D3D12_RESOURCE_DESC buffer_desc;
+    ID3D12Resource *buffer = NULL;
+    D3D12_HEAP_PROPERTIES heap;
+    ID3D12Fence *fence = NULL;
+    D3D12_RANGE range;
+    const DWORD *data;
+    HANDLE event;
+    void *ptr;
+    HRESULT hr;
+
+    hr = ID3D12Device_CheckFeatureSupport(device, D3D12_FEATURE_D3D12_OPTIONS3, &options3, sizeof(options3));
+    check("d3d12.dll", "wbi-flags-defined", hr == S_OK && !(options3.WriteBufferImmediateSupportFlags & ~defined)
+            && !(options3.WriteBufferImmediateSupportFlags & D3D12_COMMAND_LIST_SUPPORT_FLAG_BUNDLE),
+            "hr=%#lx flags=%#x", hr, options3.WriteBufferImmediateSupportFlags);
+    if (FAILED(hr))
+        return;
+
+    memset(&queue_desc, 0, sizeof(queue_desc));
+    queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    hr = ID3D12Device_CreateCommandQueue(device, &queue_desc, &iid_d3d12_command_queue, (void **)&queue);
+    if (SUCCEEDED(hr))
+        hr = ID3D12Device_CreateCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                &iid_d3d12_command_allocator, (void **)&allocator);
+    if (SUCCEEDED(hr))
+        hr = ID3D12Device_CreateCommandList(device, 0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, NULL,
+                &iid_d3d12_graphics_command_list2, (void **)&list);
+    if (SUCCEEDED(hr))
+        hr = ID3D12Device_CreateFence(device, 0, D3D12_FENCE_FLAG_NONE, &iid_d3d12_fence, (void **)&fence);
+    memset(&heap, 0, sizeof(heap));
+    heap.Type = D3D12_HEAP_TYPE_READBACK;
+    memset(&buffer_desc, 0, sizeof(buffer_desc));
+    buffer_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer_desc.Width = 256;
+    buffer_desc.Height = 1;
+    buffer_desc.DepthOrArraySize = 1;
+    buffer_desc.MipLevels = 1;
+    buffer_desc.SampleDesc.Count = 1;
+    buffer_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (SUCCEEDED(hr))
+        hr = ID3D12Device_CreateCommittedResource(device, &heap, D3D12_HEAP_FLAG_NONE, &buffer_desc,
+                D3D12_RESOURCE_STATE_COPY_DEST, NULL, &iid_d3d12_resource, (void **)&buffer);
+    if (FAILED(hr))
+    {
+        report("d3d12.dll", "wbi-write-readback", "SKIP", "queue/list/fence/readback buffer hr=%#lx", hr);
+        goto done;
+    }
+
+    params[0].Dest = ID3D12Resource_GetGPUVirtualAddress(buffer);
+    params[0].Value = 0x12345678;
+    params[1].Dest = params[0].Dest + 4;
+    params[1].Value = 0xcafebabe;
+    ID3D12GraphicsCommandList2_WriteBufferImmediate(list, 2, params, NULL);
+    hr = ID3D12GraphicsCommandList2_Close(list);
+    if (SUCCEEDED(hr))
+    {
+        ID3D12CommandQueue_ExecuteCommandLists(queue, 1, (ID3D12CommandList **)&list);
+        hr = ID3D12CommandQueue_Signal(queue, fence, 1);
+    }
+    if (SUCCEEDED(hr) && ID3D12Fence_GetCompletedValue(fence) < 1)
+    {
+        event = CreateEventW(NULL, FALSE, FALSE, NULL);
+        hr = ID3D12Fence_SetEventOnCompletion(fence, 1, event);
+        if (SUCCEEDED(hr) && WaitForSingleObject(event, 10000) != WAIT_OBJECT_0)
+            hr = E_FAIL;
+        CloseHandle(event);
+    }
+    range.Begin = 0;
+    range.End = 8;
+    ptr = NULL;
+    if (SUCCEEDED(hr))
+        hr = ID3D12Resource_Map(buffer, 0, &range, &ptr);
+    data = ptr;
+    check("d3d12.dll", "wbi-write-readback", SUCCEEDED(hr) && data && data[0] == 0x12345678 && data[1] == 0xcafebabe,
+            "hr=%#lx data=%#lx %#lx", hr, data ? data[0] : 0, data ? data[1] : 0);
+    if (ptr)
+    {
+        range.End = 0;
+        ID3D12Resource_Unmap(buffer, 0, &range);
+    }
+    check("d3d12.dll", "wbi-flags-direct", options3.WriteBufferImmediateSupportFlags & D3D12_COMMAND_LIST_SUPPORT_FLAG_DIRECT,
+            "a direct list served the write, flags=%#x", options3.WriteBufferImmediateSupportFlags);
+
+    hr = ID3D12CommandAllocator_Reset(allocator);
+    if (SUCCEEDED(hr))
+        hr = ID3D12GraphicsCommandList2_Reset(list, allocator, NULL);
+    if (SUCCEEDED(hr))
+    {
+        ID3D12GraphicsCommandList2_WriteBufferImmediate(list, 1, params, &bad_mode);
+        hr = ID3D12GraphicsCommandList2_Close(list);
+        check("d3d12.dll", "wbi-bad-mode-rejected", FAILED(hr), "Close hr=%#lx after mode %#x", hr, bad_mode);
+    }
+    else
+        report("d3d12.dll", "wbi-bad-mode-rejected", "SKIP", "list reset hr=%#lx", hr);
+
+done:
+    if (buffer)
+        ID3D12Resource_Release(buffer);
+    if (fence)
+        ID3D12Fence_Release(fence);
+    if (list)
+        ID3D12GraphicsCommandList2_Release(list);
+    if (allocator)
+        ID3D12CommandAllocator_Release(allocator);
+    if (queue)
+        ID3D12CommandQueue_Release(queue);
+}
+
 static void test_d3d12(void)
 {
     create_d3d12_func create;
@@ -364,6 +493,7 @@ static void test_d3d12(void)
     hr = ID3D12Device_CheckFeatureSupport((ID3D12Device *)device, (D3D12_FEATURE)0x7fff, &options, sizeof(options));
     check("d3d12.dll", "options-unknown-feature", FAILED(hr), "hr=%#lx", hr);
     test_d3d12_raster_tiers((ID3D12Device *)device, module);
+    test_d3d12_write_buffer_immediate((ID3D12Device *)device);
     IUnknown_Release(device);
 }
 
