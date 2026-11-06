@@ -8122,11 +8122,34 @@ static const struct hlsl_ir_var *get_allocated_object(struct hlsl_ctx *ctx, enum
     return NULL;
 }
 
+/* The number of UAV slots a target exposes, as fxc enforces it ("error X4509:
+ * maximum UAV register index exceeded, target has N slots"). Shader model 4
+ * only has UAVs in compute shaders, and cs_4_x gets a single slot (u0);
+ * ps_5_0/cs_5_0 have 8 (D3D11_PS_CS_UAV_REGISTER_COUNT). Shader model 5.1
+ * binds through register spaces and is not limited here. */
+static bool get_uav_slot_limit(const struct hlsl_ctx *ctx, unsigned int *limit)
+{
+    if (hlsl_version_ge(ctx, 5, 1))
+        return false;
+    if (hlsl_version_ge(ctx, 5, 0))
+        *limit = 8;
+    else if (ctx->profile->type == VKD3D_SHADER_TYPE_COMPUTE)
+        *limit = 1;
+    else
+        *limit = 0;
+    return true;
+}
+
 static void allocate_objects(struct hlsl_ctx *ctx, struct list *semantic_vars, enum hlsl_regset regset)
 {
     char regset_name = get_regset_name(regset);
     uint32_t min_index = 0, id = 0;
+    unsigned int uav_limit = 0;
+    bool has_uav_limit = false;
     struct hlsl_ir_var *var;
+
+    if (regset == HLSL_REGSET_UAVS)
+        has_uav_limit = get_uav_slot_limit(ctx, &uav_limit);
 
     if (regset == HLSL_REGSET_UAVS && ctx->profile->type == VKD3D_SHADER_TYPE_PIXEL)
     {
@@ -8157,6 +8180,15 @@ static void allocate_objects(struct hlsl_ctx *ctx, struct list *semantic_vars, e
                 hlsl_error(ctx, &var->loc, VKD3D_SHADER_ERROR_HLSL_OVERLAPPING_RESERVATIONS,
                         "UAV index (%u) must be higher than the maximum render target index (%u).",
                         var->regs[regset].index, min_index - 1);
+                continue;
+            }
+
+            if (has_uav_limit && var->regs[regset].index + count > uav_limit)
+            {
+                hlsl_error(ctx, &var->loc, VKD3D_SHADER_ERROR_HLSL_INVALID_RESERVATION,
+                        "Maximum UAV register index exceeded: target has %u slots, "
+                        "manual bind to slot u%u failed.", uav_limit,
+                        var->regs[regset].index + count - 1);
                 continue;
             }
 
@@ -8202,6 +8234,14 @@ static void allocate_objects(struct hlsl_ctx *ctx, struct list *semantic_vars, e
                 ++index;
             }
             index -= count;
+
+            if (has_uav_limit && index + count > uav_limit)
+            {
+                hlsl_error(ctx, &var->loc, VKD3D_SHADER_ERROR_HLSL_INVALID_INDEX,
+                        "Maximum UAV register index exceeded: target has %u slots, "
+                        "cannot bind '%s' at slot u%u.", uav_limit, var->name, index + count - 1);
+                continue;
+            }
 
             var->regs[regset].space = 0;
             var->regs[regset].index = index;
