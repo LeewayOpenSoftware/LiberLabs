@@ -824,3 +824,27 @@ diff --git a/tools/clang/tools/dxcompiler/dxcpdbutils.cpp b/tools/clang/tools/dx
    virtual STDMETHODIMP
    NewDxcPixDxilDebugInfo(IDxcPixDxilDebugInfo **ppDxilDebugInfo) override {
      if (!m_pDebugProgramBlob)
+diff --git a/tools/clang/lib/Basic/LangOptions.cpp b/tools/clang/lib/Basic/LangOptions.cpp
+--- a/tools/clang/lib/Basic/LangOptions.cpp
++++ b/tools/clang/lib/Basic/LangOptions.cpp
+@@ -16,7 +16,7 @@
+ ///////////////////////////////////////////////////////////////////////////////
+ using namespace clang;
+ 
+-#ifdef LLVM_ON_UNIX
++#if defined(LLVM_ON_UNIX) || defined(__MINGW32__)
+ #ifndef MS_SUPPORT_VARIABLE_LANGOPTS
+ #define LANGOPT(Name, Bits, Default, Description) const unsigned LangOptionsBase::Name;
+ #define LANGOPT_BOOL(Name, Default, Description) const bool LangOptionsBase::Name;
+diff --git a/tools/clang/tools/dxcompiler/dxcapi.cpp b/tools/clang/tools/dxcompiler/dxcapi.cpp
+--- a/tools/clang/tools/dxcompiler/dxcapi.cpp
++++ b/tools/clang/tools/dxcompiler/dxcapi.cpp
+@@ -96,7 +96,7 @@
+     hr = CreateDxcLinker(riid, ppv);
+   }
+ // Note: The following targets are not yet enabled for non-Windows platforms.
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+   else if (IsEqualCLSID(rclsid, CLSID_DxcDiaDataSource)) {
+     hr = CreateDxcDiaDataSource(riid, ppv);
+   }
