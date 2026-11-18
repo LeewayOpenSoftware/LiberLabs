@@ -20,7 +20,8 @@ gh workflow run msvc-build.yml -R LeewayOpenSoftware/LiberLabs -f ref=<branch-or
 
 | input | meaning |
 |---|---|
-| `ref` | LiberNT-LDW branch, tag or full sha (default `leeway/main`) |
+| `repo` | `LiberNT-LDW` (default), `LiberNT-CI` or `LiberNT-sec` |
+| `ref` | branch of that repo; LiberNT-LDW branch, tag or full sha (default `leeway/main`) |
 | `legs` | `standard` (amd64 lrmrs+conly, i386 lrmrs+conly), `amd64-only`, `with-release` |
 | `images` | also build and upload `bootcd.iso` |
 | `rostests` | also build `modules/rostests` with MSVC (kmtests/apitests artifacts) |

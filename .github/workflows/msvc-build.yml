@@ -2,13 +2,23 @@ name: msvc-build
 # MSVC + Rust build of LiberNT-LDW on GitHub-hosted Windows runners (public repos: no billing).
 # Covers what the Linux-only LiberNT-LDW CI does not: the MSVC full build (amd64 LRM-RS, i386 LRM-RS,
 # C-only legs), bootcd.iso, and the MSVC build of modules/rostests. Manual dispatch only.
+# `repo` is a fixed choice list (public repos of this organisation), never free text.
 # Nothing here uses a secret or a self-hosted runner; the job token only reads public repositories.
 
 on:
   workflow_dispatch:
     inputs:
+      repo:
+        description: "Repository of the LeewayOpenSoftware organisation to build"
+        required: true
+        default: LiberNT-LDW
+        type: choice
+        options:
+          - LiberNT-LDW
+          - LiberNT-CI
+          - LiberNT-sec
       ref:
-        description: "Branch, tag or full 40-hex sha of LiberNT-LDW to build"
+        description: "Branch, tag or full 40-hex sha of that repository to build"
         required: true
         default: leeway/main
         type: string
@@ -41,11 +51,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: msvc-${{ inputs.ref }}
+  group: msvc-${{ inputs.repo }}-${{ inputs.ref }}
   cancel-in-progress: false
 
 env:
-  LDW_REPO: LeewayOpenSoftware/LiberNT-LDW
+  LDW_REPO: LeewayOpenSoftware/${{ inputs.repo }}
 
 jobs:
   plan:
