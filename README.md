@@ -4,12 +4,31 @@ Private exchange repository of Leeway Open Software: our internal LiberNT branch
 exact-revision refs so that other machines of ours (for example Lab01) can fetch them without
 anything going to a public repository.
 
-**No compiling happens here.** By owner decision (2026-11-05, `OWNER-BUILD-ROUTING-2026-11-05.md`,
-revision): component and partial builds run on a workstation, and tested code goes to
-`LeewayOpenSoftware/LiberNT-LDW`, which builds with its normal CI. The three GitHub Actions
-workflows in `.github/workflows/` (`fast-build`, `full-build`, `compat-tests`) are **disabled in
-the repository settings and must not be dispatched or re-enabled**; the files are kept as a
-reviewed, pinned recipe only. The `ci/` scripts are likewise reference material.
+## MSVC + Rust CI for LiberNT-LDW (`msvc-build`)
+
+Since the repositories became public, GitHub-hosted runners are free, so this repo runs the MSVC
+builds that the Linux-only LiberNT-LDW CI skips: the full MSVC build (amd64 and i386, LRM-RS Rust
+legs and C-only legs, optional release), `bootcd.iso`, and the MSVC build of `modules/rostests`.
+It builds LiberNT-LDW directly (public checkout); no self-hosted runner, no secrets.
+
+How to trigger it (Actions tab -> `msvc-build` -> Run workflow, or from a shell):
+
+```
+gh workflow run msvc-build.yml -R LeewayOpenSoftware/LiberLabs -f ref=leeway/main
+gh workflow run msvc-build.yml -R LeewayOpenSoftware/LiberLabs -f ref=<branch-or-40-hex-sha> -f legs=amd64-only -f images=false -f rostests=false
+```
+
+| input | meaning |
+|---|---|
+| `ref` | LiberNT-LDW branch, tag or full sha (default `leeway/main`) |
+| `legs` | `standard` (amd64 lrmrs+conly, i386 lrmrs+conly), `amd64-only`, `with-release` |
+| `images` | also build and upload `bootcd.iso` |
+| `rostests` | also build `modules/rostests` with MSVC (kmtests/apitests artifacts) |
+| `retention_days` | artifact retention (default 3) |
+
+Each leg is one job; failures do not cancel the others, and the Rust toolchain pin comes from
+`sdk/cmake/rust.cmake` of the revision being built. The older Linux `fast-build`, `full-build` and
+`compat-tests` workflows are the pinned recipe from the private days and stay unused.
 
 ## What lives here
 

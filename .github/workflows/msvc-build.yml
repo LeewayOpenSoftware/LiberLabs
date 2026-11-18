@@ -1,0 +1,312 @@
+name: msvc-build
+# MSVC + Rust build of LiberNT-LDW on GitHub-hosted Windows runners (public repos: no billing).
+# Covers what the Linux-only LiberNT-LDW CI does not: the MSVC full build (amd64 LRM-RS, i386 LRM-RS,
+# C-only legs), bootcd.iso, and the MSVC build of modules/rostests. Manual dispatch only.
+# Nothing here uses a secret or a self-hosted runner; the job token only reads public repositories.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or full 40-hex sha of LiberNT-LDW to build"
+        required: true
+        default: leeway/main
+        type: string
+      legs:
+        description: "Which MSVC legs to build"
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard       # amd64 lrmrs debug + amd64 conly + i386 lrmrs + i386 conly
+          - amd64-only     # amd64 lrmrs debug only (fastest)
+          - with-release   # standard + amd64 lrmrs release
+      images:
+        description: "Also build bootcd.iso and upload it"
+        required: false
+        default: true
+        type: boolean
+      rostests:
+        description: "Also build modules/rostests with MSVC (amd64)"
+        required: false
+        default: true
+        type: boolean
+      retention_days:
+        description: "Artifact retention in days (1-14; a free plan has little artifact storage)"
+        required: false
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: msvc-${{ inputs.ref }}
+  cancel-in-progress: false
+
+env:
+  LDW_REPO: LeewayOpenSoftware/LiberNT-LDW
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.r.outputs.sha }}
+      matrix: ${{ steps.r.outputs.matrix }}
+    steps:
+      - name: Resolve the revision and the leg matrix
+        id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+          LEGS: ${{ inputs.legs }}
+        run: |
+          set -eu
+          case "$REF" in *[!A-Za-z0-9._/-]*|"") echo "bad ref"; exit 1;; esac
+          sha=$(gh api "repos/$LDW_REPO/commits/$REF" --jq .sha)
+          echo "building $LDW_REPO@$sha (input: $REF)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          A='{"arch":"amd64","lrm_rs":"ON","variant":"lrmrs","rust_target":"x86_64-pc-windows-msvc","build_type":"debug"}'
+          C='{"arch":"amd64","lrm_rs":"OFF","variant":"conly","rust_target":"","build_type":"debug"}'
+          I='{"arch":"i386","lrm_rs":"ON","variant":"lrmrs","rust_target":"i686-pc-windows-msvc","build_type":"debug"}'
+          J='{"arch":"i386","lrm_rs":"OFF","variant":"conly","rust_target":"","build_type":"debug"}'
+          R='{"arch":"amd64","lrm_rs":"ON","variant":"lrmrs","rust_target":"x86_64-pc-windows-msvc","build_type":"release"}'
+          case "$LEGS" in
+            amd64-only) m="$A";;
+            with-release) m="$A,$C,$I,$J,$R";;
+            *) m="$A,$C,$I,$J";;
+          esac
+          echo "matrix={\"include\":[$m]}" >> "$GITHUB_OUTPUT"
+
+  build-msvc:
+    needs: plan
+    name: msvc-${{ matrix.arch }}-${{ matrix.variant }}-${{ matrix.build_type }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+    - name: Checkout LiberNT-LDW
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ env.LDW_REPO }}
+        ref: ${{ needs.plan.outputs.sha }}
+        persist-credentials: false
+
+    - name: Install host build tools
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $zip = "$env:RUNNER_TEMP\win_flex_bison-2.5.24.zip"
+        foreach ($attempt in 1..4) {
+            gh release download v2.5.24 --repo lexxmark/winflexbison --pattern win_flex_bison-2.5.24.zip --output $zip --clobber
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 4) { throw "Downloading winflexbison failed" }
+            Start-Sleep -Seconds (15 * $attempt)
+        }
+        if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne "39C6086CE211D5415500ACC5ED2D8939861CA1696AEE48909C7F6DAF5122B505") {
+            throw "win_flex_bison-2.5.24.zip does not have the expected SHA256"
+        }
+        $tools = "$env:RUNNER_TEMP\winflexbison"
+        Expand-Archive $zip -DestinationPath $tools -Force
+        python -m pip install --upgrade mako pyyaml packaging
+        Copy-Item "$tools\win_flex.exe" "$tools\flex.exe" -Force
+        Copy-Item "$tools\win_bison.exe" "$tools\bison.exe" -Force
+        echo "$tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Install pinned Rust toolchain (MSVC target of the leg)
+      if: ${{ matrix.lrm_rs == 'ON' }}
+      shell: pwsh
+      run: |
+        $m = Select-String -Path sdk/cmake/rust.cmake -Pattern '^set\(LIBERNT_RUST_TOOLCHAIN "([^"]+)"'
+        if (-not $m) { throw "sdk/cmake/rust.cmake has no LIBERNT_RUST_TOOLCHAIN pin" }
+        $tc = $m.Matches[0].Groups[1].Value
+        rustup toolchain install $tc --profile minimal --component llvm-tools --target ${{matrix.rust_target}}
+        if ($LASTEXITCODE -ne 0) { throw "rustup could not install Rust $tc" }
+        $vv = rustup run $tc rustc --version --verbose
+        if ($LASTEXITCODE -ne 0) { throw "Rust $tc does not run" }
+        $vv
+        if (-not ($vv | Select-String -SimpleMatch 'host: x86_64-pc-windows-msvc')) {
+            throw "Rust $tc is not the x86_64-pc-windows-msvc host toolchain"
+        }
+        $libdir = rustup run $tc rustc --print target-libdir --target ${{matrix.rust_target}}
+        if (-not (Get-ChildItem "$libdir/libcore-*.rlib" -ErrorAction SilentlyContinue)) {
+            throw "Rust $tc has no core library for ${{matrix.rust_target}}"
+        }
+
+    - name: Set up the MSVC build environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ${{ matrix.arch == 'i386' && 'amd64_x86' || 'amd64' }}
+
+    - name: Configure
+      id: configure
+      shell: cmd
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        :: LRM-RS is set explicitly in both leg kinds, so a leg never falls back to the other configuration.
+        set RUST_ARGS=
+        if "${{matrix.lrm_rs}}"=="ON" set RUST_ARGS=-DLIBERNT_RUST_TARGET=${{matrix.rust_target}}
+        set BT_ARGS=
+        if "${{matrix.build_type}}"=="release" set BT_ARGS=/r
+        call configure.cmd /arch=${{matrix.arch}} %BT_ARGS% -DREACTOS_TARGET_NT=0xA00 -DDIAGDATA_CHANNEL= -DENABLE_CCACHE=0 -DLIBERNT_ENABLE_LRM_RS=${{matrix.lrm_rs}} %RUST_ARGS%
+        echo outdir=output-VS-${{matrix.arch}}-${{matrix.build_type}}>> "%GITHUB_OUTPUT%"
+
+    - name: Build submodules
+      shell: cmd
+      run: ninja -C ${{steps.configure.outputs.outdir}} submodules
+
+    - name: Build (all targets, keep going)
+      shell: cmd
+      run: ninja -C ${{steps.configure.outputs.outdir}} -k0
+
+    - name: Check the LRM-RS exports of the linked kernel
+      if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+      shell: pwsh
+      run: |
+        $k = "${{steps.configure.outputs.outdir}}/ntoskrnl/ntoskrnl.exe"
+        if (-not (Test-Path $k)) { throw "ntoskrnl.exe was not linked" }
+        $exports = dumpbin /nologo /exports $k
+        if ($LASTEXITCODE -ne 0) { throw "dumpbin could not read ntoskrnl.exe" }
+        $hits = $exports | Select-String -SimpleMatch 'LrmRs'
+        if ('${{matrix.lrm_rs}}' -eq 'ON') {
+            if (-not ($exports | Select-String -SimpleMatch 'LrmRsSelfTest')) {
+                throw "ntoskrnl.exe was built with LRM-RS ON but does not export LrmRsSelfTest"
+            }
+            $hits
+        } elseif ($hits) {
+            $hits
+            throw "The C-only ntoskrnl.exe exports an LrmRs symbol"
+        } else {
+            "C-only ntoskrnl.exe has no LrmRs exports"
+        }
+
+    - name: Build bootcd.iso
+      id: bootcd
+      if: ${{ !cancelled() && steps.configure.outcome == 'success' && inputs.images }}
+      shell: cmd
+      run: ninja -C ${{steps.configure.outputs.outdir}} bootcd -k0
+
+    - name: Name artifacts
+      id: names
+      if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+      shell: pwsh
+      run: |
+        "tag=msvc-${{matrix.arch}}-${{matrix.variant}}-${{matrix.build_type}}-$('${{needs.plan.outputs.sha}}'.Substring(0, 11))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    - name: Upload bootcd.iso
+      if: ${{ !cancelled() && steps.bootcd.outcome == 'success' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: bootcd-iso-${{steps.names.outputs.tag}}
+        path: ${{steps.configure.outputs.outdir}}/bootcd.iso
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention_days }}
+        compression-level: 0
+
+    - name: Upload the kernel and the Rust library
+      if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ntoskrnl-${{steps.names.outputs.tag}}
+        path: |
+          ${{steps.configure.outputs.outdir}}/ntoskrnl/ntoskrnl.exe
+          ${{steps.configure.outputs.outdir}}/ntoskrnl/ntoskrnl.map
+          ${{steps.configure.outputs.outdir}}/ntoskrnl/**/ntoskrnl.pdb
+          ${{steps.configure.outputs.outdir}}/ntoskrnl/**/lrm_rs*.lib
+          ${{steps.configure.outputs.outdir}}/ntoskrnl/**/liblrm_rs*.a
+        if-no-files-found: warn
+        retention-days: ${{ inputs.retention_days }}
+
+  build-rostests-msvc:
+    needs: plan
+    if: ${{ inputs.rostests }}
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+    - name: Checkout LiberNT-LDW
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ env.LDW_REPO }}
+        ref: ${{ needs.plan.outputs.sha }}
+        persist-credentials: false
+
+    - name: Install host build tools
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $zip = "$env:RUNNER_TEMP\win_flex_bison-2.5.24.zip"
+        foreach ($attempt in 1..4) {
+            gh release download v2.5.24 --repo lexxmark/winflexbison --pattern win_flex_bison-2.5.24.zip --output $zip --clobber
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 4) { throw "Downloading winflexbison failed" }
+            Start-Sleep -Seconds (15 * $attempt)
+        }
+        if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne "39C6086CE211D5415500ACC5ED2D8939861CA1696AEE48909C7F6DAF5122B505") {
+            throw "win_flex_bison-2.5.24.zip does not have the expected SHA256"
+        }
+        $tools = "$env:RUNNER_TEMP\winflexbison"
+        Expand-Archive $zip -DestinationPath $tools -Force
+        python -m pip install --upgrade mako pyyaml packaging
+        Copy-Item "$tools\win_flex.exe" "$tools\flex.exe" -Force
+        Copy-Item "$tools\win_bison.exe" "$tools\bison.exe" -Force
+        echo "$tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Install pinned Rust toolchain (MSVC amd64)
+      shell: pwsh
+      run: |
+        $m = Select-String -Path sdk/cmake/rust.cmake -Pattern '^set\(LIBERNT_RUST_TOOLCHAIN "([^"]+)"'
+        if (-not $m) { throw "sdk/cmake/rust.cmake has no LIBERNT_RUST_TOOLCHAIN pin" }
+        $tc = $m.Matches[0].Groups[1].Value
+        rustup toolchain install $tc --profile minimal --component llvm-tools --target x86_64-pc-windows-msvc
+        if ($LASTEXITCODE -ne 0) { throw "rustup could not install Rust $tc" }
+        rustup run $tc rustc --version --verbose
+
+    - name: Set up the MSVC build environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+
+    - name: Configure
+      id: configure
+      shell: cmd
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        call configure.cmd /arch=amd64 -DREACTOS_TARGET_NT=0xA00 -DDIAGDATA_CHANNEL= -DENABLE_CCACHE=0 -DLIBERNT_RUST_TARGET=x86_64-pc-windows-msvc -DENABLE_ROSTESTS=1
+        echo outdir=output-VS-amd64-debug>> "%GITHUB_OUTPUT%"
+
+    - name: Build the test suite
+      shell: cmd
+      run: |
+        ninja -C ${{steps.configure.outputs.outdir}} -t targets all | findstr /B /C:"modules/rostests/all:" >nul
+        if %ERRORLEVEL% EQU 0 (ninja -C ${{steps.configure.outputs.outdir}} -k0 modules/rostests/all) else (ninja -C ${{steps.configure.outputs.outdir}} -k0)
+
+    - name: Collect the test binaries
+      shell: pwsh
+      run: |
+        $out = "${{steps.configure.outputs.outdir}}"
+        New-Item -ItemType Directory -Force tests-out/kmtests, tests-out/apitests-amd64, tests-out/apitests-wow64 | Out-Null
+        Get-ChildItem -Recurse "$out/modules/rostests/kmtests" -File |
+            Where-Object { $_.Extension -in '.exe', '.sys', '.dll', '.inf' } |
+            ForEach-Object { Copy-Item $_.FullName tests-out/kmtests/ }
+        Get-ChildItem -Recurse "$out/modules/rostests/apitests" -Filter '*_apitest.exe' -File |
+            ForEach-Object { Copy-Item $_.FullName tests-out/apitests-amd64/ }
+        if (Test-Path "$out/_wow64_i386/modules/rostests/apitests") {
+            Get-ChildItem -Recurse "$out/_wow64_i386/modules/rostests/apitests" -Filter '*_apitest.exe' -File |
+                ForEach-Object { Copy-Item $_.FullName tests-out/apitests-wow64/ }
+        }
+        Get-ChildItem -Recurse tests-out -File | Measure-Object | ForEach-Object { "collected $($_.Count) files" }
+
+    - name: Upload the test binaries
+      uses: actions/upload-artifact@v7
+      with:
+        name: rostests-msvc-amd64-${{needs.plan.outputs.sha}}
+        path: tests-out/
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention_days }}
